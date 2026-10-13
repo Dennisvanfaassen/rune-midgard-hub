@@ -14,6 +14,89 @@ export type Database = {
   }
   public: {
     Tables: {
+      forum_posts: {
+        Row: {
+          author_id: string
+          body: string
+          created_at: string
+          id: string
+          thread_id: string
+        }
+        Insert: {
+          author_id: string
+          body: string
+          created_at?: string
+          id?: string
+          thread_id: string
+        }
+        Update: {
+          author_id?: string
+          body?: string
+          created_at?: string
+          id?: string
+          thread_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "forum_posts_author_id_fkey"
+            columns: ["author_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "forum_posts_thread_id_fkey"
+            columns: ["thread_id"]
+            isOneToOne: false
+            referencedRelation: "forum_threads"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      forum_threads: {
+        Row: {
+          author_id: string
+          body: string
+          category: string
+          created_at: string
+          id: string
+          last_post_at: string
+          pinned: boolean
+          title: string
+          updated_at: string
+        }
+        Insert: {
+          author_id: string
+          body: string
+          category: string
+          created_at?: string
+          id?: string
+          last_post_at?: string
+          pinned?: boolean
+          title: string
+          updated_at?: string
+        }
+        Update: {
+          author_id?: string
+          body?: string
+          category?: string
+          created_at?: string
+          id?: string
+          last_post_at?: string
+          pinned?: boolean
+          title?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "forum_threads_author_id_fkey"
+            columns: ["author_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       gear_wishlist: {
         Row: {
           created_at: string
@@ -49,6 +132,50 @@ export type Database = {
           {
             foreignKeyName: "gear_wishlist_user_fk"
             columns: ["user_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      market_listings: {
+        Row: {
+          created_at: string
+          id: string
+          item_key: string
+          item_name: string
+          note: string | null
+          price: number
+          quantity: number
+          seller_id: string
+          status: string
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          item_key: string
+          item_name: string
+          note?: string | null
+          price: number
+          quantity?: number
+          seller_id: string
+          status?: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          item_key?: string
+          item_name?: string
+          note?: string | null
+          price?: number
+          quantity?: number
+          seller_id?: string
+          status?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "market_listings_seller_id_fkey"
+            columns: ["seller_id"]
             isOneToOne: false
             referencedRelation: "profiles"
             referencedColumns: ["id"]
@@ -220,6 +347,48 @@ export type Database = {
           updated_at?: string
         }
         Relationships: []
+      }
+      wishlist_help: {
+        Row: {
+          created_at: string
+          helper_id: string
+          id: string
+          kind: string
+          message: string | null
+          wishlist_id: string
+        }
+        Insert: {
+          created_at?: string
+          helper_id: string
+          id?: string
+          kind: string
+          message?: string | null
+          wishlist_id: string
+        }
+        Update: {
+          created_at?: string
+          helper_id?: string
+          id?: string
+          kind?: string
+          message?: string | null
+          wishlist_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "wishlist_help_helper_id_fkey"
+            columns: ["helper_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "wishlist_help_wishlist_id_fkey"
+            columns: ["wishlist_id"]
+            isOneToOne: false
+            referencedRelation: "gear_wishlist"
+            referencedColumns: ["id"]
+          },
+        ]
       }
     }
     Views: {

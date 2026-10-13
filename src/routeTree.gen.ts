@@ -12,8 +12,11 @@ import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as AuthRouteImport } from './routes/auth'
 import { Route as CalculatorRouteImport } from './routes/calculator'
+import { Route as MarketRouteImport } from './routes/market'
 import { Route as SkillsRouteImport } from './routes/skills'
 import { Route as WishlistsRouteImport } from './routes/wishlists'
+import { Route as ForumIndexRouteImport } from './routes/forum.index'
+import { Route as ForumIdRouteImport } from './routes/forum.$id'
 import { Route as MembersIndexRouteImport } from './routes/members.index'
 import { Route as MembersIdRouteImport } from './routes/members.$id'
 import { Route as PartiesIndexRouteImport } from './routes/parties.index'
@@ -35,6 +38,11 @@ const CalculatorRoute = CalculatorRouteImport.update({
   path: '/calculator',
   getParentRoute: () => rootRouteImport,
 } as any)
+const MarketRoute = MarketRouteImport.update({
+  id: '/market',
+  path: '/market',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const SkillsRoute = SkillsRouteImport.update({
   id: '/skills',
   path: '/skills',
@@ -43,6 +51,16 @@ const SkillsRoute = SkillsRouteImport.update({
 const WishlistsRoute = WishlistsRouteImport.update({
   id: '/wishlists',
   path: '/wishlists',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ForumIndexRoute = ForumIndexRouteImport.update({
+  id: '/forum/',
+  path: '/forum/',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ForumIdRoute = ForumIdRouteImport.update({
+  id: '/forum/$id',
+  path: '/forum/$id',
   getParentRoute: () => rootRouteImport,
 } as any)
 const MembersIndexRoute = MembersIndexRouteImport.update({
@@ -75,11 +93,14 @@ export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/auth': typeof AuthRoute
   '/calculator': typeof CalculatorRoute
+  '/market': typeof MarketRoute
   '/skills': typeof SkillsRoute
   '/wishlists': typeof WishlistsRoute
+  '/forum/$id': typeof ForumIdRoute
   '/members/$id': typeof MembersIdRoute
   '/parties/$id': typeof PartiesIdRoute
   '/parties/new': typeof PartiesNewRoute
+  '/forum/': typeof ForumIndexRoute
   '/members/': typeof MembersIndexRoute
   '/parties/': typeof PartiesIndexRoute
 }
@@ -87,11 +108,14 @@ export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/auth': typeof AuthRoute
   '/calculator': typeof CalculatorRoute
+  '/market': typeof MarketRoute
   '/skills': typeof SkillsRoute
   '/wishlists': typeof WishlistsRoute
+  '/forum/$id': typeof ForumIdRoute
   '/members/$id': typeof MembersIdRoute
   '/parties/$id': typeof PartiesIdRoute
   '/parties/new': typeof PartiesNewRoute
+  '/forum': typeof ForumIndexRoute
   '/members': typeof MembersIndexRoute
   '/parties': typeof PartiesIndexRoute
 }
@@ -100,11 +124,14 @@ export interface FileRoutesById {
   '/': typeof IndexRoute
   '/auth': typeof AuthRoute
   '/calculator': typeof CalculatorRoute
+  '/market': typeof MarketRoute
   '/skills': typeof SkillsRoute
   '/wishlists': typeof WishlistsRoute
+  '/forum/$id': typeof ForumIdRoute
   '/members/$id': typeof MembersIdRoute
   '/parties/$id': typeof PartiesIdRoute
   '/parties/new': typeof PartiesNewRoute
+  '/forum/': typeof ForumIndexRoute
   '/members/': typeof MembersIndexRoute
   '/parties/': typeof PartiesIndexRoute
 }
@@ -114,11 +141,14 @@ export interface FileRouteTypes {
     | '/'
     | '/auth'
     | '/calculator'
+    | '/market'
     | '/skills'
     | '/wishlists'
+    | '/forum/$id'
     | '/members/$id'
     | '/parties/$id'
     | '/parties/new'
+    | '/forum/'
     | '/members/'
     | '/parties/'
   fileRoutesByTo: FileRoutesByTo
@@ -126,11 +156,14 @@ export interface FileRouteTypes {
     | '/'
     | '/auth'
     | '/calculator'
+    | '/market'
     | '/skills'
     | '/wishlists'
+    | '/forum/$id'
     | '/members/$id'
     | '/parties/$id'
     | '/parties/new'
+    | '/forum'
     | '/members'
     | '/parties'
   id:
@@ -138,11 +171,14 @@ export interface FileRouteTypes {
     | '/'
     | '/auth'
     | '/calculator'
+    | '/market'
     | '/skills'
     | '/wishlists'
+    | '/forum/$id'
     | '/members/$id'
     | '/parties/$id'
     | '/parties/new'
+    | '/forum/'
     | '/members/'
     | '/parties/'
   fileRoutesById: FileRoutesById
@@ -151,11 +187,14 @@ export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   AuthRoute: typeof AuthRoute
   CalculatorRoute: typeof CalculatorRoute
+  MarketRoute: typeof MarketRoute
   SkillsRoute: typeof SkillsRoute
   WishlistsRoute: typeof WishlistsRoute
+  ForumIdRoute: typeof ForumIdRoute
   MembersIdRoute: typeof MembersIdRoute
   PartiesIdRoute: typeof PartiesIdRoute
   PartiesNewRoute: typeof PartiesNewRoute
+  ForumIndexRoute: typeof ForumIndexRoute
   MembersIndexRoute: typeof MembersIndexRoute
   PartiesIndexRoute: typeof PartiesIndexRoute
 }
@@ -183,6 +222,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof CalculatorRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/market': {
+      id: '/market'
+      path: '/market'
+      fullPath: '/market'
+      preLoaderRoute: typeof MarketRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/skills': {
       id: '/skills'
       path: '/skills'
@@ -195,6 +241,20 @@ declare module '@tanstack/react-router' {
       path: '/wishlists'
       fullPath: '/wishlists'
       preLoaderRoute: typeof WishlistsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/forum/': {
+      id: '/forum/'
+      path: '/forum'
+      fullPath: '/forum/'
+      preLoaderRoute: typeof ForumIndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/forum/$id': {
+      id: '/forum/$id'
+      path: '/forum/$id'
+      fullPath: '/forum/$id'
+      preLoaderRoute: typeof ForumIdRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/members/': {
@@ -239,11 +299,14 @@ const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   AuthRoute: AuthRoute,
   CalculatorRoute: CalculatorRoute,
+  MarketRoute: MarketRoute,
   SkillsRoute: SkillsRoute,
   WishlistsRoute: WishlistsRoute,
+  ForumIdRoute: ForumIdRoute,
   MembersIdRoute: MembersIdRoute,
   PartiesIdRoute: PartiesIdRoute,
   PartiesNewRoute: PartiesNewRoute,
+  ForumIndexRoute: ForumIndexRoute,
   MembersIndexRoute: MembersIndexRoute,
   PartiesIndexRoute: PartiesIndexRoute,
 }

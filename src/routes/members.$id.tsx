@@ -10,6 +10,8 @@ import { Textarea } from "@/components/ui/textarea";
 import { CharacterPortrait } from "@/components/CharacterPortrait";
 import { JobSelect } from "@/components/JobSelect";
 import { jobName, itemLabel } from "@/lib/ro/jobs";
+import { itemDisplay } from "@/lib/ro/slots";
+import { HelpOffers, type HelpOffer } from "@/components/WishlistBoard";
 import { loadEngine, loadSkt, type Engine, type SktData } from "@/lib/ro/engine";
 
 export const Route = createFileRoute("/members/$id")({
@@ -40,7 +42,7 @@ function Profile() {
   });
   const gear = useQuery({
     queryKey: ["gear", id],
-    queryFn: async () => (await supabase.from("gear_wishlist").select("*").eq("user_id", id).order("created_at")).data ?? [],
+    queryFn: async () => (await supabase.from("gear_wishlist").select("*,wishlist_help(id,kind,helper_id,message,profiles(display_name,char_name))").eq("user_id", id).order("created_at")).data ?? [],
   });
   const [engine, setEngine] = useState<Engine | null>(null);
   const [skt, setSkt] = useState<SktData | null>(null);
@@ -119,10 +121,11 @@ function Profile() {
                 <span className={"rounded px-2 py-0.5 text-xs font-semibold " + (g.status === "have" ? "bg-success/20 text-success" : "bg-destructive/20 text-destructive")}>
                   {g.status === "have" ? "I have this" : "Still need"}
                 </span>
-                <span className="font-semibold">{g.item_name}</span>
+                <span className="font-semibold">{itemDisplay(g.item_key, g.item_name)}</span>
                 {g.status === "need" && item?.drops?.length ? (
                   <span className="text-xs text-muted-foreground">Drops from: {item.drops.map(([m, r]) => `${engine?.mobNames[m] ?? m} (${(r / 100).toFixed(2)}%)`).join(", ")}</span>
                 ) : null}
+                {g.status === "need" && <div className="basis-full"><HelpOffers wishlistId={g.id} owner={id} offers={g.wishlist_help as HelpOffer[]} onChange={refresh} /></div>}
                 {isOwner && (
                   <div className="ml-auto flex gap-2">
                     <Button size="sm" variant="outline" onClick={async () => {

@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button";
 import { jobName, partyCutoff, formatPartyTime, partyCountdown } from "@/lib/ro/jobs";
 import { WishlistBoard } from "@/components/WishlistBoard";
 import { CharacterPortrait } from "@/components/CharacterPortrait";
+import { ListingCard, useListings } from "@/components/MarketListing";
 import logo from "@/assets/guild-blue-bird.png.asset.json";
 import hero from "@/assets/hero.jpg";
 
@@ -33,6 +34,7 @@ function Home() {
     queryKey: ["members", "newest"],
     queryFn: async () => (await supabase.from("profiles").select("id,display_name,char_name,job,base_lv,avatar_path").order("created_at", { ascending: false }).limit(6)).data ?? [],
   });
+  const market = useListings(6);
   return (
     <main>
       <section className="relative overflow-hidden">
@@ -79,6 +81,11 @@ function Home() {
       <section className="mx-auto mt-10 max-w-6xl px-4">
         <div className="mb-4 flex items-center justify-between gap-3"><h2 className="text-2xl font-bold">Newest wishlists</h2><Link to="/wishlists" className="text-sm text-primary">All wishlists →</Link></div>
         <WishlistBoard newest />
+      </section>
+      <section className="mx-auto mt-10 max-w-6xl px-4 pb-12">
+        <div className="mb-4 flex items-center justify-between gap-3"><h2 className="text-2xl font-bold">Marketplace</h2><Link to="/market" className="text-sm text-primary">All listings →</Link></div>
+        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">{(market.data ?? []).map((l) => <ListingCard key={l.id} l={l} />)}</div>
+        {market.data?.length === 0 && <p className="text-sm text-muted-foreground">Nothing for sale yet.</p>}
       </section>
     </main>
   );
