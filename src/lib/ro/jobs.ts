@@ -8,10 +8,15 @@ export type Job = (typeof JOBS)[number];
 export const jobName = (j: string) => (j === "Supernovice" ? "Super Novice" : j);
 
 export const MAX_PARTY_SIZE = 12;
+export const PARTY_ROLES = ["Any", "Tank", "Mobber", "Tapper", "SP", "Bragi", "Other"];
+export const PARTY_VISIBLE_FOR_MS = 24 * 60 * 60 * 1000;
+export const partyCutoff = (now = Date.now()) => new Date(now - PARTY_VISIBLE_FOR_MS).toISOString();
+export const isPartyVisible = (startsAt: string, now = Date.now()) => new Date(startsAt).getTime() + PARTY_VISIBLE_FOR_MS > now;
 
 export type PartyTemplate = { id: string; name: string; description: string; roles: string[] };
 
 export const PARTY_TEMPLATES: PartyTemplate[] = [
+  { id: "stala", name: "Stala", description: "Priest, Hunter, Wizard and flexible support roles.", roles: ["Priest", "Hunter", "Wizard", "SP", "Bragi", "Tank", "Tapper", "Mobber", "Other"] },
   { id: "mvp", name: "MVP Hunt", description: "Full party for boss hunting.",
     roles: ["Knight", "Crusader", "Priest", "Priest", "Wizard", "Wizard", "Hunter", "Bard", "Dancer", "Blacksmith", "Sage", "Any"] },
   { id: "woe", name: "WoE Squad", description: "War of Emperium team.",
@@ -27,4 +32,4 @@ export const PARTY_TEMPLATES: PartyTemplate[] = [
 export const canAddSlot = (count: number) => count < MAX_PARTY_SIZE;
 
 /** Can a player of `job` take a slot that asks for `role`? */
-export const canTakeSlot = (role: string, job: string) => role === "Any" || role === job;
+export const canTakeSlot = (role: string, job: string) => PARTY_ROLES.includes(role) || role === job;
