@@ -36,24 +36,24 @@ function NewParty() {
   const navigate = useNavigate();
   const [f, setF] = useState({ title: "", place: "", notes: "", date: "", time: "20:00" });
   const [template, setTemplate] = useState("mvp");
-  const [roles, setRoles] = useState<string[]>(PARTY_TEMPLATES[0].roles);
+  const [roles, setRoles] = useState<string[]>(PARTY_TEMPLATES[0]?.roles ?? ["Any"]);
   const [busy, setBusy] = useState(false);
 
   if (ready && !userId) return <main className="mx-auto max-w-xl px-4 py-16">Please <Link to="/auth" className="text-primary">sign in</Link> to plan a party.</main>;
 
   async function create() {
     const p = schema.safeParse(f);
-    if (!p.success) return toast.error(p.error.issues[0].message);
-    if (roles.length < 1 || roles.length > MAX_PARTY_SIZE) return toast.error("A party has 1 to 12 slots");
+    if (!p.success) { toast.error(p.error.issues[0]?.message ?? "Invalid input"); return; }
+    if (roles.length < 1 || roles.length > MAX_PARTY_SIZE) { toast.error("A party has 1 to 12 slots"); return; }
     setBusy(true);
     const { data, error } = await supabase.from("parties").insert({
       creator_id: userId!, title: p.data.title, place: p.data.place, notes: p.data.notes || null, template,
       starts_at: new Date(`${f.date}T${f.time}`).toISOString(),
     }).select("id").single();
-    if (error || !data) { setBusy(false); return toast.error(error?.message ?? "Could not create party"); }
+    if (error || !data) { setBusy(false); toast.error(error?.message ?? "Could not create party"); return; }
     const { error: e2 } = await supabase.from("party_slots").insert(roles.map((role, position) => ({ party_id: data.id, position, role })));
     setBusy(false);
-    if (e2) return toast.error(e2.message);
+    if (e2) { toast.error(e2.message); return; }
     navigate({ to: "/parties/$id", params: { id: data.id } });
   }
 

@@ -56,7 +56,7 @@ function Calculator() {
   }, [engine, build]);
 
   const usable = useMemo(() => {
-    if (!engine) return {} as Record<string, typeof engine.items>;
+    if (!engine) return {} as Record<string, Engine["items"]>;
     const jn = jobName(job);
     const out: Record<string, Engine["items"]> = {};
     for (const [slot] of SLOTS) out[slot] = engine.items.filter((i) => fitsSlot(i, slot) && (!i.jobs || i.jobs.includes(jn))).sort((a, b) => a.name.localeCompare(b.name));
@@ -122,7 +122,7 @@ function Calculator() {
                       <span className="w-32 text-sm text-muted-foreground">{label}</span>
                       <select className={fieldClass + " min-w-48 flex-1"} value={e?.key ?? ""} onChange={(ev) => setSlot(slot, { key: ev.target.value, cards: [] })}>
                         <option value="">— none —</option>
-                        {(usable[slot] ?? []).map((i) => <option key={i.key} value={i.key}>{i.name}{i.slots ? ` [${i.slots}]` : ""}</option>)}
+                        {(usable[slot] ?? []).map((i: Engine["items"][number]) => <option key={i.key} value={i.key}>{i.name}{i.slots ? ` [${i.slots}]` : ""}</option>)}
                       </select>
                       {item && slot !== "ammo" && (
                         <select className={fieldClass} value={e!.refine} onChange={(ev) => setSlot(slot, { refine: +ev.target.value })}>

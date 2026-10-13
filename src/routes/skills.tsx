@@ -24,16 +24,16 @@ const LINKONLY = new Set(["KN_ONEHAND", "BS_ADRENALINE2", "HT_POWER", "AM_TWILIG
 type Info = Record<string, { tier: "t1" | "t2"; max: number; req: [string, number][]; quest: boolean }>;
 
 function tiersOf(skt: SktData, job: string) {
-  const J = skt.jobs[job];
+  const J = skt.jobs[job]!;
   const first = J.inherit.find((x) => x !== "Novice");
   const t: { key: "t1" | "t2"; job: string; list: SktData["jobs"][string]["tree"] }[] = [];
-  if (first) t.push({ key: "t1", job: first, list: skt.jobs[first].tree.filter((s) => !LINKONLY.has(s[0])) });
+  if (first) t.push({ key: "t1", job: first, list: skt.jobs[first]!.tree.filter((s) => !LINKONLY.has(s[0])) });
   t.push({ key: first ? "t2" : "t1", job, list: J.tree.filter((s) => !LINKONLY.has(s[0])) });
   return t;
 }
 function pools(skt: SktData, job: string, jl: number) {
   if (job === "Supernovice") return { t1: 98 } as { t1: number; t2?: number };
-  const first = skt.jobs[job].inherit.find((x) => x !== "Novice");
+  const first = skt.jobs[job]!.inherit.find((x) => x !== "Novice");
   return first ? { t1: jl - 1, t2: 49 } : { t1: 49 };
 }
 

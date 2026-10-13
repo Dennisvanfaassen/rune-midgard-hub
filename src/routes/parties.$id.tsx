@@ -47,9 +47,9 @@ function PartyPage() {
   const refresh = () => qc.invalidateQueries({ queryKey: key });
 
   async function take(slotId: string, role: string) {
-    if (!canTakeSlot(role, job)) return toast.error(`This slot needs a ${jobName(role)}`);
+    if (!canTakeSlot(role, job)) { toast.error(`This slot needs a ${jobName(role)}`); return; }
     if (mine) await supabase.from("party_slots").update({ user_id: null, job: null, char_name: null }).eq("id", mine.id);
-    const { error } = await supabase.from("party_slots").update({ user_id: userId, job, char_name: me.data?.char_name || me.data?.display_name })
+    const { error } = await supabase.from("party_slots").update({ user_id: userId, job, char_name: me.data?.char_name || me.data?.display_name || null })
       .eq("id", slotId).is("user_id", null);
     if (error) toast.error(error.message); else toast.success("You joined the party");
     refresh();
