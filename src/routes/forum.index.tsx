@@ -7,7 +7,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/lib/auth";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Textarea } from "@/components/ui/textarea";
+import { RichEditor } from "@/components/RichText";
 import { fieldClass } from "@/components/JobSelect";
 import { FORUM_CATEGORIES, categoryName } from "@/lib/forum";
 
@@ -58,7 +58,7 @@ function Forum() {
         <select aria-label="Category" className={fieldClass} value={f.category} onChange={(e) => setF({ ...f, category: e.target.value })}>{FORUM_CATEGORIES.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}</select>
         <Input className="flex-1" placeholder="Topic title" maxLength={120} value={f.title} onChange={(e) => setF({ ...f, title: e.target.value })} />
       </div>
-      <Textarea rows={8} placeholder="Write your guide, build or question…" maxLength={20000} value={f.body} onChange={(e) => setF({ ...f, body: e.target.value })} />
+      <RichEditor placeholder="Write your guide, build or question… add headings, colours and images" minHeight={320} onChange={(body) => setF((prev) => ({ ...prev, body }))} />
       <div><Button disabled={busy} onClick={create}>Post topic</Button></div>
     </div>}
     <div className="mt-6 grid gap-2 sm:grid-cols-3 lg:grid-cols-6">

@@ -5,7 +5,7 @@ import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/lib/auth";
 import { Button } from "@/components/ui/button";
-import { Textarea } from "@/components/ui/textarea";
+import { RichEditor, RichContent } from "@/components/RichText";
 import { CharacterPortrait } from "@/components/CharacterPortrait";
 import { categoryName } from "@/lib/forum";
 import { jobName } from "@/lib/ro/jobs";
@@ -33,7 +33,7 @@ function PostCard({ author, body, date, actions }: { author: Author; body: strin
     </Link>
     <div className="min-w-0 flex-1">
       <div className="mb-2 flex items-center gap-2 text-xs text-muted-foreground"><span className="font-semibold text-primary sm:hidden">{author?.char_name || author?.display_name}</span>{new Date(date).toLocaleString()}<div className="ml-auto flex gap-1">{actions}</div></div>
-      <div className="whitespace-pre-line break-words">{body}</div>
+      <div className="break-words"><RichContent html={body} /></div>
     </div>
   </article>;
 }
@@ -44,6 +44,7 @@ function Thread() {
   const qc = useQueryClient();
   const navigate = useNavigate();
   const [reply, setReply] = useState("");
+  const [replyKey, setReplyKey] = useState(0);
   const [busy, setBusy] = useState(false);
   const [editing, setEditing] = useState<{ id: string; body: string; thread: boolean } | null>(null);
   const author = "id,display_name,char_name,job,avatar_path";
@@ -65,7 +66,7 @@ function Thread() {
     setBusy(true);
     const { error } = await supabase.from("forum_posts").insert({ thread_id: id, author_id: userId, body: reply.trim() });
     setBusy(false);
-    if (error) toast.error(error.message); else { setReply(""); refresh(); }
+    if (error) toast.error(error.message); else { setReply(""); setReplyKey((k) => k + 1); refresh(); }
   }
   async function saveEdit() {
     if (!editing || !editing.body.trim()) return;
@@ -74,7 +75,7 @@ function Thread() {
       : await supabase.from("forum_posts").update({ body: editing.body.trim() }).eq("id", editing.id);
     if (error) toast.error(error.message); else { setEditing(null); refresh(); }
   }
-  const editor = <div className="grid gap-2"><Textarea rows={6} value={editing?.body ?? ""} onChange={(e) => editing && setEditing({ ...editing, body: e.target.value })} /><div className="flex gap-2"><Button size="sm" onClick={saveEdit}>Save</Button><Button size="sm" variant="ghost" onClick={() => setEditing(null)}>Cancel</Button></div></div>;
+  const editor = <div className="grid gap-2"><RichEditor key={editing?.id} initial={editing?.body ?? ""} onChange={(body) => setEditing((e) => (e ? { ...e, body } : e))} /><div className="flex gap-2"><Button size="sm" onClick={saveEdit}>Save</Button><Button size="sm" variant="ghost" onClick={() => setEditing(null)}>Cancel</Button></div></div>;
 
   return <main className="mx-auto max-w-4xl px-4 py-10">
     <Link to="/forum" className="text-sm text-primary">← Forum</Link>
@@ -88,7 +89,7 @@ function Thread() {
         <Button size="sm" variant="ghost" className="h-6" onClick={() => setEditing({ id: p.id, body: p.body, thread: false })}>Edit</Button>
         <Button size="sm" variant="ghost" className="h-6 text-destructive" onClick={async () => { const { error } = await supabase.from("forum_posts").delete().eq("id", p.id); if (error) toast.error(error.message); else refresh(); }}>Delete</Button></>} />)}
     </div>
-    {userId ? <div className="mt-6 grid gap-2"><Textarea rows={4} placeholder="Write a reply…" maxLength={10000} value={reply} onChange={(e) => setReply(e.target.value)} /><div><Button disabled={busy || !reply.trim()} onClick={send}>Reply</Button></div></div>
+    {userId ? <div className="mt-6 grid gap-2"><RichEditor key={replyKey} placeholder="Write a reply…" minHeight={140} onChange={setReply} /><div><Button disabled={busy || !reply.trim()} onClick={send}>Reply</Button></div></div>
       : <Button asChild variant="outline" className="mt-6"><Link to="/auth">Sign in to reply</Link></Button>}
   </main>;
 }
