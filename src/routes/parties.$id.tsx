@@ -6,6 +6,8 @@ import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/lib/auth";
 import { Button } from "@/components/ui/button";
 import { JobSelect } from "@/components/JobSelect";
+import { useServerFn } from "@tanstack/react-start";
+import { announceParty, DISCORD_REASON } from "@/lib/discord.functions";
 import { MAX_PARTY_SIZE, partyCutoff, canAddSlot, canTakeSlot, jobName, formatPartyTime, partyCountdown } from "@/lib/ro/jobs";
 
 export const Route = createFileRoute("/parties/$id")({
@@ -27,6 +29,8 @@ function PartyPage() {
   const { userId } = useAuth();
   const qc = useQueryClient();
   const navigate = useNavigate();
+  const announce = useServerFn(announceParty);
+  const [posting, setPosting] = useState(false);
   const key = ["party", id];
   const { data: party, isLoading } = useQuery({
     queryKey: key, refetchInterval: 30_000,
@@ -101,6 +105,7 @@ function PartyPage() {
       {isCreator && (
         <div className="mt-6 flex flex-wrap gap-2">
           <Button variant="outline" disabled={!canAddSlot(slots.length)} onClick={addSlot}>{canAddSlot(slots.length) ? "Add open slot" : `Full (${MAX_PARTY_SIZE} max)`}</Button>
+          <Button variant="outline" disabled={posting} onClick={async () => { setPosting(true); try { const r = await announce({ data: { partyId: id, origin: window.location.origin } }); if (r.sent) toast.success("Posted to Discord #party-planner"); else toast.error(`Not posted: ${DISCORD_REASON[r.reason ?? ""] ?? "unknown problem"}`); } catch (e) { toast.error(`Not posted: ${e instanceof Error ? e.message : "network error"}`); } setPosting(false); }}>{posting ? "Posting…" : "Post to Discord"}</Button>
           <Button variant="destructive" onClick={async () => { if (!confirm("Delete this party?")) return; const { error } = await supabase.from("parties").delete().eq("id", id); if (error) { toast.error(error.message); return; } await qc.invalidateQueries({ queryKey: ["parties"] }); navigate({ to: "/parties" }); }}>Delete party</Button>
         </div>
       )}
