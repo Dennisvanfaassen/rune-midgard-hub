@@ -14,6 +14,8 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 export const Route = createFileRoute("/skills")({
   head: () => ({
     meta: [
+      { property: "og:type", content: "website" },
+      { name: "twitter:card", content: "summary_large_image" },
       { title: "Skill Simulator · Rune Midgard" },
       { name: "description", content: "Plan your Ragnarok Online skill tree with prerequisites and skill point limits." },
       { property: "og:title", content: "Skill Simulator · Rune Midgard" },

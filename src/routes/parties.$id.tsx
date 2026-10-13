@@ -11,6 +11,8 @@ import { MAX_PARTY_SIZE, partyCutoff, canAddSlot, canTakeSlot, jobName } from "@
 export const Route = createFileRoute("/parties/$id")({
   head: () => ({
     meta: [
+      { property: "og:type", content: "website" },
+      { name: "twitter:card", content: "summary_large_image" },
       { title: "Party details · Rune Midgard" },
       { name: "description", content: "See who joined this guild party and take an open slot." },
       { property: "og:title", content: "Party details · Rune Midgard" },

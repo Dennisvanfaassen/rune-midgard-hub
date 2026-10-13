@@ -30,7 +30,7 @@ export function CalculatorOptions({ engine, options, onChange }: { engine: Engin
                 <select aria-label={b.name} className={fieldClass + " w-20 shrink-0"} value={value || 0} onChange={(e) => setBuff(b.id, +e.target.value)}>{Array.from({ length: b.maxLv + 1 }, (_, lv) => <option key={lv} value={lv}>{lv ? `Lv ${lv}` : "Off"}</option>)}</select>}
             </label>;
           })}</div>
-          {group === "song" && <div className="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-3">{["agi", "dex", "int", "vit", "luk", "lessons"].map((key) => <label key={key} className="text-xs text-muted-foreground">Caster {key.toUpperCase()}<Input aria-label={`Song caster ${key}`} type="number" min={0} max={key === "lessons" ? 10 : 999} value={options.buffs.SONG_CASTER?.[key] ?? engine.CalcStatus.SONG_CASTER[key]} onChange={(e) => setBuff("SONG_CASTER", { ...engine.CalcStatus.SONG_CASTER, ...options.buffs.SONG_CASTER, [key]: Math.max(0, Math.min(key === "lessons" ? 10 : 999, +e.target.value)) })} /></label>)}</div>}
+          {group === "song" && <div className="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-3">{["agi", "dex", "int", "vit", "luk", "lessons"].map((key) => <label key={key} className="text-xs text-muted-foreground">Caster {key.toUpperCase()}<Input aria-label={`Song caster ${key}`} type="number" min={0} max={key === "lessons" ? 10 : 999} value={options.buffs["SONG_CASTER"]?.[key] ?? engine.CalcStatus.SONG_CASTER[key]} onChange={(e) => setBuff("SONG_CASTER", { ...engine.CalcStatus.SONG_CASTER, ...options.buffs["SONG_CASTER"], [key]: Math.max(0, Math.min(key === "lessons" ? 10 : 999, +e.target.value)) })} /></label>)}</div>}
         </div>)}
       </TabsContent>
       <TabsContent value="pets" className="space-y-4">

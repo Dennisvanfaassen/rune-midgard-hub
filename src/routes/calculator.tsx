@@ -13,6 +13,8 @@ import { CalculatorOptions, emptyOptions, type BuildOptions } from "@/components
 export const Route = createFileRoute("/calculator")({
   head: () => ({
     meta: [
+      { property: "og:type", content: "website" },
+      { name: "twitter:card", content: "summary_large_image" },
       { title: "Stat Calculator · Rune Midgard" },
       { name: "description", content: "Pre-renewal Ragnarok Online stat calculator: HP, SP, ATK, MATK, DEF, Hit, Flee, Crit and ASPD." },
       { property: "og:title", content: "Stat Calculator · Rune Midgard" },

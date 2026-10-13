@@ -10,6 +10,8 @@ import { jobName } from "@/lib/ro/jobs";
 export const Route = createFileRoute("/members/")({
   head: () => ({
     meta: [
+      { property: "og:type", content: "website" },
+      { name: "twitter:card", content: "summary_large_image" },
       { title: "Members · Rune Midgard" },
       { name: "description", content: "All Rune Midgard guild members with their builds and gear goals." },
       { property: "og:title", content: "Members · Rune Midgard" },

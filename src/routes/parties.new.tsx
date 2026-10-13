@@ -16,6 +16,8 @@ import { MAX_PARTY_SIZE, PARTY_TEMPLATES, canAddSlot } from "@/lib/ro/jobs";
 export const Route = createFileRoute("/parties/new")({
   head: () => ({
     meta: [
+      { property: "og:type", content: "website" },
+      { name: "twitter:card", content: "summary_large_image" },
       { title: "Plan a party · Rune Midgard" },
       { name: "description", content: "Create a new guild party with date, time, place and class slots." },
       { property: "og:title", content: "Plan a party · Rune Midgard" },

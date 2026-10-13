@@ -11,6 +11,8 @@ import hero from "@/assets/hero.jpg";
 export const Route = createFileRoute("/")({
   head: () => ({
     meta: [
+      { property: "og:type", content: "website" },
+      { name: "twitter:card", content: "summary_large_image" },
       { title: "Rune Midgard · Ragnarok Online Guild" },
       { name: "description", content: "Plan parties, compare builds and hunt gear together with the Rune Midgard guild." },
       { property: "og:title", content: "Rune Midgard · Ragnarok Online Guild" },

@@ -15,6 +15,8 @@ import { loadEngine, loadSkt, type Engine, type SktData } from "@/lib/ro/engine"
 export const Route = createFileRoute("/members/$id")({
   head: () => ({
     meta: [
+      { property: "og:type", content: "website" },
+      { name: "twitter:card", content: "summary_large_image" },
       { title: "Member profile · Rune Midgard" },
       { name: "description", content: "A guild member's stat build, skill build and gear wishlist." },
       { property: "og:title", content: "Member profile · Rune Midgard" },
@@ -60,7 +62,7 @@ function Profile() {
         <p className="mt-1 text-primary">{jobName(p.job)} · Base {p.base_lv} / Job {p.job_lv}</p>
         {p.bio && <p className="mt-3 whitespace-pre-line text-muted-foreground">{p.bio}</p>}
         </div></div>
-        {isOwner && <EditProfile p={p} onSaved={() => qc.invalidateQueries({ queryKey: ["profile", id] })} />}
+        {isOwner && <EditProfile p={p} onSaved={() => { qc.invalidateQueries({ queryKey: ["profile", id] }); qc.invalidateQueries({ queryKey: ["members"] }); qc.invalidateQueries({ queryKey: ["wishlists"] }); }} />}
       </section>
 
       <section className="grid gap-6 md:grid-cols-2">

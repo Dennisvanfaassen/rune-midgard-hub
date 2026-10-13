@@ -14,6 +14,7 @@ export function WishlistBoard({ newest = false }: { newest?: boolean }) {
   const qc = useQueryClient();
   const [search, setSearch] = useState("");
   const [filter, setFilter] = useState("all");
+  const [pending, setPending] = useState<string | null>(null);
   const { data = [], isLoading, isError } = useQuery({
     queryKey: ["wishlists"],
     queryFn: async () => {
@@ -31,7 +32,10 @@ export function WishlistBoard({ newest = false }: { newest?: boolean }) {
   }
   const entries = [...groups.entries()].slice(0, newest ? 3 : undefined);
   async function toggle(id: string, status: string, owner: string) {
+    if (pending) return;
+    setPending(id);
     const { error } = await supabase.from("gear_wishlist").update({ status: status === "have" ? "need" : "have" }).eq("id", id);
+    setPending(null);
     if (error) { toast.error(error.message); return; }
     await qc.invalidateQueries({ queryKey: ["wishlists"] });
     qc.invalidateQueries({ queryKey: ["gear", owner] });
@@ -40,7 +44,7 @@ export function WishlistBoard({ newest = false }: { newest?: boolean }) {
   return <div>
     {!newest && <div className="mb-6 flex flex-wrap gap-3">
       <Input aria-label="Search wishlists" placeholder="Search members or gear" className="max-w-sm" value={search} onChange={(e) => setSearch(e.target.value)} />
-      <div className="flex gap-1">{[["all", "All gear"], ["need", "Still needed"], ["have", "Owned"]].map(([key, label]) => <Button key={key} variant={filter === key ? "default" : "outline"} size="sm" onClick={() => setFilter(key)}>{label}</Button>)}</div>
+      <div className="flex gap-1">{[["all", "All gear"], ["need", "Still needed"], ["have", "Owned"]].map(([key, label]) => <Button key={key} variant={filter === key ? "default" : "outline"} size="sm" onClick={() => { if (key) setFilter(key); }}>{label}</Button>)}</div>
     </div>}
     {isLoading && <p className="text-muted-foreground">Loading wishlists…</p>}
     {isError && <p className="text-destructive">Could not load wishlists.</p>}
@@ -56,7 +60,7 @@ export function WishlistBoard({ newest = false }: { newest?: boolean }) {
           <ul className="divide-y divide-border">{(newest ? items.slice(0, 4) : items).map((g) => <li key={g.id} className="flex items-start gap-2 py-3">
             {g.status === "have" ? <Check className="mt-1 h-4 w-4 shrink-0 text-success" /> : <Crosshair className="mt-1 h-4 w-4 shrink-0 text-accent" />}
             <div className="min-w-0 flex-1"><p className="text-sm font-semibold">{g.item_name}</p><p className="text-xs text-muted-foreground">{g.status === "have" ? "I have this gear" : "I still need this gear"}</p></div>
-            {owner === userId && <Button aria-label={`Change ownership of ${g.item_name}`} title={g.status === "have" ? "I still need this gear" : "I have this gear"} size="icon" variant="ghost" className="h-8 w-8 shrink-0" onClick={() => toggle(g.id, g.status, owner)}>{g.status === "have" ? <Crosshair /> : <Check />}</Button>}
+            {owner === userId && <Button aria-label={`Change ownership of ${g.item_name}`} title={g.status === "have" ? "I still need this gear" : "I have this gear"} size="icon" variant="ghost" disabled={!!pending} className="h-8 w-8 shrink-0" onClick={() => toggle(g.id, g.status, owner)}>{g.status === "have" ? <Crosshair /> : <Check />}</Button>}
           </li>)}</ul>
           {newest && items.length > 4 && <Link to="/members/$id" params={{ id: owner }} className="text-xs text-primary">View all {items.length} items →</Link>}
         </article>;

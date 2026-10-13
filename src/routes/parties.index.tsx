@@ -8,6 +8,8 @@ import { Button } from "@/components/ui/button";
 export const Route = createFileRoute("/parties/")({
   head: () => ({
     meta: [
+      { property: "og:type", content: "website" },
+      { name: "twitter:card", content: "summary_large_image" },
       { title: "Party Planner · Rune Midgard" },
       { name: "description", content: "Plan and join guild parties: MVP hunts, WoE squads, dungeon runs and leveling." },
       { property: "og:title", content: "Party Planner · Rune Midgard" },
@@ -23,7 +25,7 @@ function Parties() {
     refetchInterval: 30_000,
     queryKey: ["parties"],
     queryFn: async () => (await supabase.from("parties").select("id,title,place,starts_at,template,profiles(display_name),party_slots(user_id)")
-      .gte("starts_at", partyCutoff()).order("starts_at")).data ?? [],
+      .gt("starts_at", partyCutoff()).order("starts_at")).data ?? [],
   });
   return (
     <main className="mx-auto max-w-5xl px-4 py-10">

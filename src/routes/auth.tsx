@@ -12,6 +12,8 @@ import { Label } from "@/components/ui/label";
 export const Route = createFileRoute("/auth")({
   head: () => ({
     meta: [
+      { property: "og:type", content: "website" },
+      { name: "twitter:card", content: "summary_large_image" },
       { title: "Sign in · Rune Midgard" },
       { name: "description", content: "Sign in or join the Rune Midgard guild website." },
       { property: "og:title", content: "Sign in · Rune Midgard" },
