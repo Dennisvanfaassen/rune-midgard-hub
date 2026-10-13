@@ -6,7 +6,7 @@ import { useAuth } from "@/lib/auth";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { JobSelect, fieldClass } from "@/components/JobSelect";
-import { jobName } from "@/lib/ro/jobs";
+import { jobName, itemLabel } from "@/lib/ro/jobs";
 import { SLOTS, cardFits, fitsSlot, loadEngine, type Engine } from "@/lib/ro/engine";
 import { CalculatorOptions, emptyOptions, type BuildOptions } from "@/components/CalculatorOptions";
 import { CombatOptions, defaultCombat, type CombatSelection } from "@/components/CombatOptions";

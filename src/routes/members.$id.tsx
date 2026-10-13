@@ -9,7 +9,7 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { CharacterPortrait } from "@/components/CharacterPortrait";
 import { JobSelect } from "@/components/JobSelect";
-import { jobName } from "@/lib/ro/jobs";
+import { jobName, itemLabel } from "@/lib/ro/jobs";
 import { loadEngine, loadSkt, type Engine, type SktData } from "@/lib/ro/engine";
 
 export const Route = createFileRoute("/members/$id")({
