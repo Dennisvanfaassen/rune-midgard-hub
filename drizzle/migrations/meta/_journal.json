@@ -29,6 +29,13 @@
       "when": 1791915205302,
       "tag": "0003_forum_market_wishlist_help",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1791916143836,
+      "tag": "0004_forum_rich_content",
+      "breakpoints": true
     }
   ]
 }
