@@ -6,11 +6,13 @@ import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/lib/auth";
 import { Button } from "@/components/ui/button";
 import { JobSelect } from "@/components/JobSelect";
-import { MAX_PARTY_SIZE, canAddSlot, canTakeSlot, jobName } from "@/lib/ro/jobs";
+import { MAX_PARTY_SIZE, partyCutoff, canAddSlot, canTakeSlot, jobName } from "@/lib/ro/jobs";
 
 export const Route = createFileRoute("/parties/$id")({
   head: () => ({
     meta: [
+      { property: "og:type", content: "website" },
+      { name: "twitter:card", content: "summary_large_image" },
       { title: "Party details · Rune Midgard" },
       { name: "description", content: "See who joined this guild party and take an open slot." },
       { property: "og:title", content: "Party details · Rune Midgard" },
@@ -27,13 +29,13 @@ function PartyPage() {
   const navigate = useNavigate();
   const key = ["party", id];
   const { data: party, isLoading } = useQuery({
-    queryKey: key,
-    queryFn: async () => (await supabase.from("parties").select("*,profiles(display_name),party_slots(*,profiles(display_name,char_name))").eq("id", id).maybeSingle()).data,
+    queryKey: key, refetchInterval: 30_000,
+    queryFn: async () => (await supabase.from("parties").select("*,profiles(display_name),party_slots(*,profiles(display_name,char_name))").eq("id", id).gt("starts_at", partyCutoff()).maybeSingle()).data,
   });
   const me = useQuery({
     queryKey: ["profile", userId],
     enabled: !!userId,
-    queryFn: async () => (await supabase.from("profiles").select("job,char_name,display_name").eq("id", userId!).maybeSingle()).data,
+    queryFn: async () => (await supabase.from("profiles").select("job,char_name,display_name").eq("id", userId ?? "").maybeSingle()).data,
   });
   const [job, setJob] = useState("Knight");
   useEffect(() => { if (me.data?.job) setJob(me.data.job); }, [me.data?.job]);
@@ -47,6 +49,7 @@ function PartyPage() {
   const refresh = () => qc.invalidateQueries({ queryKey: key });
 
   async function take(slotId: string, role: string) {
+    if (!userId) return;
     if (!canTakeSlot(role, job)) { toast.error(`This slot needs a ${jobName(role)}`); return; }
     if (mine) await supabase.from("party_slots").update({ user_id: null, job: null, char_name: null }).eq("id", mine.id);
     const { error } = await supabase.from("party_slots").update({ user_id: userId, job, char_name: me.data?.char_name || me.data?.display_name || null })
@@ -97,7 +100,7 @@ function PartyPage() {
       {isCreator && (
         <div className="mt-6 flex flex-wrap gap-2">
           <Button variant="outline" disabled={!canAddSlot(slots.length)} onClick={addSlot}>{canAddSlot(slots.length) ? "Add open slot" : `Full (${MAX_PARTY_SIZE} max)`}</Button>
-          <Button variant="destructive" onClick={async () => { if (!confirm("Delete this party?")) return; await supabase.from("parties").delete().eq("id", id); navigate({ to: "/parties" }); }}>Delete party</Button>
+          <Button variant="destructive" onClick={async () => { if (!confirm("Delete this party?")) return; const { error } = await supabase.from("parties").delete().eq("id", id); if (error) { toast.error(error.message); return; } await qc.invalidateQueries({ queryKey: ["parties"] }); navigate({ to: "/parties" }); }}>Delete party</Button>
         </div>
       )}
     </main>

@@ -2,12 +2,17 @@ import { createFileRoute, Link } from "@tanstack/react-router";
 import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
-import { jobName } from "@/lib/ro/jobs";
+import { jobName, partyCutoff } from "@/lib/ro/jobs";
+import { WishlistBoard } from "@/components/WishlistBoard";
+import { CharacterPortrait } from "@/components/CharacterPortrait";
+import logo from "@/assets/guild-blue-bird.png.asset.json";
 import hero from "@/assets/hero.jpg";
 
 export const Route = createFileRoute("/")({
   head: () => ({
     meta: [
+      { property: "og:type", content: "website" },
+      { name: "twitter:card", content: "summary_large_image" },
       { title: "Rune Midgard · Ragnarok Online Guild" },
       { name: "description", content: "Plan parties, compare builds and hunt gear together with the Rune Midgard guild." },
       { property: "og:title", content: "Rune Midgard · Ragnarok Online Guild" },
@@ -20,19 +25,21 @@ export const Route = createFileRoute("/")({
 function Home() {
   const parties = useQuery({
     queryKey: ["parties", "upcoming"],
+    refetchInterval: 30_000,
     queryFn: async () => (await supabase.from("parties").select("id,title,place,starts_at,party_slots(user_id)")
-      .gte("starts_at", new Date().toISOString()).order("starts_at").limit(4)).data ?? [],
+      .gt("starts_at", partyCutoff()).order("starts_at").limit(4)).data ?? [],
   });
   const members = useQuery({
     queryKey: ["members", "newest"],
-    queryFn: async () => (await supabase.from("profiles").select("id,display_name,char_name,job,base_lv").order("created_at", { ascending: false }).limit(6)).data ?? [],
+    queryFn: async () => (await supabase.from("profiles").select("id,display_name,char_name,job,base_lv,avatar_path").order("created_at", { ascending: false }).limit(6)).data ?? [],
   });
   return (
     <main>
       <section className="relative overflow-hidden">
         <img src={hero} alt="Prontera at dusk" width={1920} height={832} className="absolute inset-0 h-full w-full object-cover opacity-60" />
         <div className="absolute inset-0 bg-gradient-to-b from-background/30 via-background/60 to-background" />
-        <div className="relative mx-auto max-w-6xl px-4 py-24 md:py-36">
+        <div className="relative mx-auto max-w-6xl px-4 py-16 md:py-20">
+          <img src={logo.url} alt="Rune Midgard blue bird guild logo" className="mb-4 h-20 w-20 object-contain" />
           <p className="text-sm uppercase tracking-[0.3em] text-primary">Ragnarok Online guild</p>
           <h1 className="mt-3 text-5xl font-black md:text-7xl">Rune Midgard</h1>
           <p className="mt-4 max-w-xl text-lg text-muted-foreground">Gather your party, perfect your build and help each other farm the gear you dream of.</p>
@@ -60,13 +67,18 @@ function Home() {
           <div className="mb-3 flex items-center justify-between"><h2 className="text-2xl font-bold">Newest members</h2><Link to="/members" className="text-sm text-primary">All members</Link></div>
           <div className="grid grid-cols-2 gap-2">
             {(members.data ?? []).map((m) => (
-              <Link key={m.id} to="/members/$id" params={{ id: m.id }} className="rounded-lg border border-border bg-card p-3 hover:border-primary">
-                <div className="font-semibold">{m.char_name || m.display_name}</div>
-                <div className="text-xs text-muted-foreground">{jobName(m.job)} · Lv {m.base_lv}</div>
+              <Link key={m.id} to="/members/$id" params={{ id: m.id }} className="flex items-center gap-2 rounded-lg border border-border bg-card p-3 hover:border-primary">
+                <CharacterPortrait path={m.avatar_path} name={m.char_name || m.display_name} className="h-14 w-10" />
+                <div className="min-w-0"><div className="font-semibold">{m.char_name || m.display_name}</div>
+                <div className="text-xs text-muted-foreground">{jobName(m.job)} · Lv {m.base_lv}</div></div>
               </Link>
             ))}
           </div>
         </div>
+      </section>
+      <section className="mx-auto mt-10 max-w-6xl px-4">
+        <div className="mb-4 flex items-center justify-between gap-3"><h2 className="text-2xl font-bold">Newest wishlists</h2><Link to="/wishlists" className="text-sm text-primary">All wishlists →</Link></div>
+        <WishlistBoard newest />
       </section>
     </main>
   );

@@ -2,11 +2,14 @@ import { createFileRoute, Link } from "@tanstack/react-router";
 import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/lib/auth";
+import { partyCutoff } from "@/lib/ro/jobs";
 import { Button } from "@/components/ui/button";
 
 export const Route = createFileRoute("/parties/")({
   head: () => ({
     meta: [
+      { property: "og:type", content: "website" },
+      { name: "twitter:card", content: "summary_large_image" },
       { title: "Party Planner · Rune Midgard" },
       { name: "description", content: "Plan and join guild parties: MVP hunts, WoE squads, dungeon runs and leveling." },
       { property: "og:title", content: "Party Planner · Rune Midgard" },
@@ -19,9 +22,10 @@ export const Route = createFileRoute("/parties/")({
 function Parties() {
   const { userId } = useAuth();
   const { data = [], isLoading } = useQuery({
+    refetchInterval: 30_000,
     queryKey: ["parties"],
     queryFn: async () => (await supabase.from("parties").select("id,title,place,starts_at,template,profiles(display_name),party_slots(user_id)")
-      .gte("starts_at", new Date(Date.now() - 6 * 3600e3).toISOString()).order("starts_at")).data ?? [],
+      .gt("starts_at", partyCutoff()).order("starts_at")).data ?? [],
   });
   return (
     <main className="mx-auto max-w-5xl px-4 py-10">
