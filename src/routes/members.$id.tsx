@@ -84,7 +84,7 @@ function Profile() {
               {engine && (
                 <ul className="mt-3 space-y-1 text-sm">
                   {Object.entries(sb.build.equip).filter(([, e]) => e?.key).map(([slot, e]) => (
-                    <li key={slot}><span className="text-muted-foreground">{slot}:</span> {e.refine ? `+${e.refine} ` : ""}{engine.itemsByKey[e.key] ? itemLabel(engine.itemsByKey[e.key]) : e.key}
+                    <li key={slot}><span className="text-muted-foreground">{slot}:</span> {e.refine ? `+${e.refine} ` : ""}{itemLabel(engine.itemsByKey[e.key] ?? { name: e.key })}
                       {e.cards.filter(Boolean).length > 0 && <span className="text-muted-foreground"> [{e.cards.filter(Boolean).map((c) => engine.itemsByKey[c]?.name ?? c).join(", ")}]</span>}</li>
                   ))}
                 </ul>
