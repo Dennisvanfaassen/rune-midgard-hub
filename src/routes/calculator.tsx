@@ -10,6 +10,7 @@ import { jobName } from "@/lib/ro/jobs";
 import { SLOTS, cardFits, fitsSlot, loadEngine, type Engine } from "@/lib/ro/engine";
 import { CalculatorOptions, emptyOptions, type BuildOptions } from "@/components/CalculatorOptions";
 import { CombatOptions, defaultCombat, type CombatSelection } from "@/components/CombatOptions";
+import { useQueryClient } from "@tanstack/react-query";
 
 export const Route = createFileRoute("/calculator")({
   head: () => ({
@@ -30,6 +31,7 @@ type Equip = Record<string, { key: string; refine: number; cards: string[]; forg
 
 function Calculator() {
   const { userId } = useAuth();
+  const qc = useQueryClient();
   const [engine, setEngine] = useState<Engine | null>(null);
   const [job, setJob] = useState("Knight");
   const [baseLv, setBaseLv] = useState(99);
@@ -85,7 +87,7 @@ function Calculator() {
   async function save() {
     if (!userId || !summary) return;
     const { error } = await supabase.from("profiles").update({ stat_build: { build, summary } as any, job, base_lv: baseLv, job_lv: jobLv }).eq("id", userId);
-    if (error) toast.error(error.message); else toast.success("Build saved to your profile");
+    if (error) toast.error(error.message); else { qc.invalidateQueries({ queryKey: ["profile", userId] }); qc.invalidateQueries({ queryKey: ["members"] }); toast.success("Build saved to your profile"); }
   }
   const setSlot = (slot: string, patch: Partial<Equip[string]>) =>
     setEquip((e) => {

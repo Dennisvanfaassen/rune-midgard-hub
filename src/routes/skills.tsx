@@ -10,6 +10,7 @@ import { loadSkt, type SktData } from "@/lib/ro/engine";
 import { SkillIcon } from "@/components/SkillIcon";
 import { Minus, Plus, RotateCcw } from "lucide-react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { useQueryClient } from "@tanstack/react-query";
 
 export const Route = createFileRoute("/skills")({
   head: () => ({
@@ -45,6 +46,7 @@ function pools(skt: SktData, job: string, jl: number) {
 
 function Skills() {
   const { userId } = useAuth();
+  const qc = useQueryClient();
   const [skt, setSkt] = useState<SktData | null>(null);
   const [job, setJob] = useState("Knight");
   const [jl, setJl] = useState(50);
@@ -101,7 +103,7 @@ function Skills() {
   async function save() {
     if (!userId) return;
     const { error } = await supabase.from("profiles").update({ skill_build: { job, jl, lv } as any }).eq("id", userId);
-    if (error) toast.error(error.message); else toast.success("Skill build saved to your profile");
+    if (error) toast.error(error.message); else { qc.invalidateQueries({ queryKey: ["profile", userId] }); toast.success("Skill build saved to your profile"); }
   }
 
   const hasFirst = pool.t2 != null;
