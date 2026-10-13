@@ -26,7 +26,7 @@ export const Route = createFileRoute("/members/$id")({
   component: Profile,
 });
 
-type StatBuild = { build: { stats: Record<string, number>; equip: Record<string, { key: string; refine: number; cards: string[] }> }; summary: Record<string, number | string> };
+type StatBuild = { build: { buffs?: Record<string, any>; pet?: { mob: string; loyal: boolean }; manual?: Record<string, number>; combat?: { mob: string }; stats: Record<string, number>; equip: Record<string, { key: string; refine: number; cards: string[] }> }; summary: Record<string, number | string> };
 type SkillBuild = { job: string; jl: number; lv: Record<string, number> };
 
 function Profile() {
@@ -76,6 +76,11 @@ function Profile() {
               <div className="mt-3 grid grid-cols-2 gap-x-4 text-sm">
                 {Object.entries(sb.summary).map(([k, v]) => <div key={k} className="flex justify-between border-b border-border py-1"><span className="text-muted-foreground">{k}</span><span>{v}</span></div>)}
               </div>
+              {engine && <div className="mt-4 space-y-2 text-xs text-muted-foreground">
+                {sb.build.pet && <p>Pet: {engine.mobNames[sb.build.pet.mob] || sb.build.pet.mob}{sb.build.pet.loyal ? " · Loyal" : ""}</p>}
+                {sb.build.combat && <p>Combat target: {engine.mobNames[sb.build.combat.mob] || sb.build.combat.mob}</p>}
+                {!!sb.build.buffs && <p>{engine.CalcStatus.BUFFS.filter((b) => !!sb.build.buffs?.[b.id]).map((b) => `${b.name}${typeof sb.build.buffs?.[b.id] === "number" ? ` ${sb.build.buffs[b.id]}` : ""}`).join(" · ")}</p>}
+              </div>}
               {engine && (
                 <ul className="mt-3 space-y-1 text-sm">
                   {Object.entries(sb.build.equip).filter(([, e]) => e?.key).map(([slot, e]) => (

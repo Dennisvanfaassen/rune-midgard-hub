@@ -3,7 +3,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/lib/auth";
 import { Button } from "@/components/ui/button";
-import crest from "@/assets/guild-blue-logo.png.asset.json";
+import crest from "@/assets/guild-blue-bird.png.asset.json";
 
 const NAV = [
   { to: "/parties", label: "Party Planner" },

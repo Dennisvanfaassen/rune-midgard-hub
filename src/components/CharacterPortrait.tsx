@@ -1,6 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
-import logo from "@/assets/guild-blue-logo.png.asset.json";
+import logo from "@/assets/guild-blue-bird.png.asset.json";
 
 export function CharacterPortrait({ path, name, className = "h-24 w-24" }: { path?: string | null; name: string; className?: string }) {
   const { data } = useQuery({

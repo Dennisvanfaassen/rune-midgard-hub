@@ -5,7 +5,7 @@ import { Button } from "@/components/ui/button";
 import { jobName, partyCutoff } from "@/lib/ro/jobs";
 import { WishlistBoard } from "@/components/WishlistBoard";
 import { CharacterPortrait } from "@/components/CharacterPortrait";
-import logo from "@/assets/guild-blue-logo.png.asset.json";
+import logo from "@/assets/guild-blue-bird.png.asset.json";
 import hero from "@/assets/hero.jpg";
 
 export const Route = createFileRoute("/")({
