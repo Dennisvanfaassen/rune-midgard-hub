@@ -155,7 +155,7 @@ export function RichEditor({ initial = "", onChange, placeholder = "Write someth
     if (error) { setUploading(false); toast.error(error.message); return; }
     const { data } = await supabase.storage.from(BUCKET).createSignedUrl(path, 60 * 60 * 6);
     setUploading(false);
-    if (data?.signedUrl) editor.chain().focus().setImage({ src: data.signedUrl, alt: file.name } as never).updateAttributes("image", { path }).run();
+    if (data?.signedUrl) editor.chain().focus().insertContent({ type: "image", attrs: { src: data.signedUrl, alt: file.name, path } }).run();
   }
 
   return <div className="rounded-md border border-input bg-background" onPaste={(e) => { const f = [...e.clipboardData.files].find((x) => x.type.startsWith("image/")); if (f) { e.preventDefault(); upload(f); } }}
