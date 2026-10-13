@@ -3,6 +3,8 @@ import { useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { z } from "zod";
+import { useServerFn } from "@tanstack/react-start";
+import { announceParty } from "@/lib/discord.functions";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/lib/auth";
 import { Button } from "@/components/ui/button";
@@ -41,6 +43,7 @@ function NewParty() {
   const [f, setF] = useState({ title: "", place: "", notes: "", date: "", time: "20:00" });
   const [template, setTemplate] = useState("stala");
   const qc = useQueryClient();
+  const announce = useServerFn(announceParty);
   const templates = useQuery({ queryKey: ["party-templates"], queryFn: async () => { const { data, error } = await supabase.from("party_templates").select("*").order("created_at"); if (error) throw error; return data; } });
   const allTemplates = [...PARTY_TEMPLATES, ...(templates.data ?? [])];
   const [templateName, setTemplateName] = useState("");
@@ -73,6 +76,7 @@ function NewParty() {
     const { error: e2 } = await supabase.from("party_slots").insert(roles.map((role, position) => ({ party_id: data.id, position, role })));
     setBusy(false);
     if (e2) { toast.error(e2.message); return; }
+    announce({ data: { partyId: data.id, origin: window.location.origin } }).then((r) => { if (r.sent) toast.success("Posted to Discord #party-planner"); }).catch(() => {});
     navigate({ to: "/parties/$id", params: { id: data.id } });
   }
 
