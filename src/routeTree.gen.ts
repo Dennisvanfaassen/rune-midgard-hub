@@ -13,6 +13,7 @@ import { Route as IndexRouteImport } from './routes/index'
 import { Route as AuthRouteImport } from './routes/auth'
 import { Route as CalculatorRouteImport } from './routes/calculator'
 import { Route as SkillsRouteImport } from './routes/skills'
+import { Route as WishlistsRouteImport } from './routes/wishlists'
 import { Route as MembersIndexRouteImport } from './routes/members.index'
 import { Route as MembersIdRouteImport } from './routes/members.$id'
 import { Route as PartiesIndexRouteImport } from './routes/parties.index'
@@ -37,6 +38,11 @@ const CalculatorRoute = CalculatorRouteImport.update({
 const SkillsRoute = SkillsRouteImport.update({
   id: '/skills',
   path: '/skills',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const WishlistsRoute = WishlistsRouteImport.update({
+  id: '/wishlists',
+  path: '/wishlists',
   getParentRoute: () => rootRouteImport,
 } as any)
 const MembersIndexRoute = MembersIndexRouteImport.update({
@@ -70,6 +76,7 @@ export interface FileRoutesByFullPath {
   '/auth': typeof AuthRoute
   '/calculator': typeof CalculatorRoute
   '/skills': typeof SkillsRoute
+  '/wishlists': typeof WishlistsRoute
   '/members/$id': typeof MembersIdRoute
   '/parties/$id': typeof PartiesIdRoute
   '/parties/new': typeof PartiesNewRoute
@@ -81,6 +88,7 @@ export interface FileRoutesByTo {
   '/auth': typeof AuthRoute
   '/calculator': typeof CalculatorRoute
   '/skills': typeof SkillsRoute
+  '/wishlists': typeof WishlistsRoute
   '/members/$id': typeof MembersIdRoute
   '/parties/$id': typeof PartiesIdRoute
   '/parties/new': typeof PartiesNewRoute
@@ -93,6 +101,7 @@ export interface FileRoutesById {
   '/auth': typeof AuthRoute
   '/calculator': typeof CalculatorRoute
   '/skills': typeof SkillsRoute
+  '/wishlists': typeof WishlistsRoute
   '/members/$id': typeof MembersIdRoute
   '/parties/$id': typeof PartiesIdRoute
   '/parties/new': typeof PartiesNewRoute
@@ -106,6 +115,7 @@ export interface FileRouteTypes {
     | '/auth'
     | '/calculator'
     | '/skills'
+    | '/wishlists'
     | '/members/$id'
     | '/parties/$id'
     | '/parties/new'
@@ -117,6 +127,7 @@ export interface FileRouteTypes {
     | '/auth'
     | '/calculator'
     | '/skills'
+    | '/wishlists'
     | '/members/$id'
     | '/parties/$id'
     | '/parties/new'
@@ -128,6 +139,7 @@ export interface FileRouteTypes {
     | '/auth'
     | '/calculator'
     | '/skills'
+    | '/wishlists'
     | '/members/$id'
     | '/parties/$id'
     | '/parties/new'
@@ -140,6 +152,7 @@ export interface RootRouteChildren {
   AuthRoute: typeof AuthRoute
   CalculatorRoute: typeof CalculatorRoute
   SkillsRoute: typeof SkillsRoute
+  WishlistsRoute: typeof WishlistsRoute
   MembersIdRoute: typeof MembersIdRoute
   PartiesIdRoute: typeof PartiesIdRoute
   PartiesNewRoute: typeof PartiesNewRoute
@@ -175,6 +188,13 @@ declare module '@tanstack/react-router' {
       path: '/skills'
       fullPath: '/skills'
       preLoaderRoute: typeof SkillsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/wishlists': {
+      id: '/wishlists'
+      path: '/wishlists'
+      fullPath: '/wishlists'
+      preLoaderRoute: typeof WishlistsRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/members/': {
@@ -220,6 +240,7 @@ const rootRouteChildren: RootRouteChildren = {
   AuthRoute: AuthRoute,
   CalculatorRoute: CalculatorRoute,
   SkillsRoute: SkillsRoute,
+  WishlistsRoute: WishlistsRoute,
   MembersIdRoute: MembersIdRoute,
   PartiesIdRoute: PartiesIdRoute,
   PartiesNewRoute: PartiesNewRoute,
