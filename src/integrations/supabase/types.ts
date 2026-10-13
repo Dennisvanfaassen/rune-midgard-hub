@@ -141,8 +141,44 @@ export type Database = {
           },
         ]
       }
+      party_templates: {
+        Row: {
+          created_at: string
+          creator_id: string
+          description: string
+          id: string
+          name: string
+          roles: string[]
+        }
+        Insert: {
+          created_at?: string
+          creator_id: string
+          description?: string
+          id?: string
+          name: string
+          roles: string[]
+        }
+        Update: {
+          created_at?: string
+          creator_id?: string
+          description?: string
+          id?: string
+          name?: string
+          roles?: string[]
+        }
+        Relationships: [
+          {
+            foreignKeyName: "party_templates_creator_id_fkey"
+            columns: ["creator_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       profiles: {
         Row: {
+          avatar_path: string | null
           base_lv: number
           bio: string | null
           char_name: string | null
@@ -156,6 +192,7 @@ export type Database = {
           updated_at: string
         }
         Insert: {
+          avatar_path?: string | null
           base_lv?: number
           bio?: string | null
           char_name?: string | null
@@ -169,6 +206,7 @@ export type Database = {
           updated_at?: string
         }
         Update: {
+          avatar_path?: string | null
           base_lv?: number
           bio?: string | null
           char_name?: string | null
