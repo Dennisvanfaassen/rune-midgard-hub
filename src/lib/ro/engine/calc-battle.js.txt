@@ -1,0 +1,1106 @@
+/* Soulbound calculator: damage engine. Port of rAthena pre-renewal battle.cpp (weapon / magic / misc attacks).
+ * Source reference: rathena/rathena master, src/map/battle.cpp + src/map/skills/<lineage>/<skill>.cpp, only the
+ * #ifndef RENEWAL branches. Soulbound deviations are marked "// Soulbound:".
+ *
+ * Averages: every random piece (weapon variance, arrow ATK, over-upgrade, VIT DEF, MATK spread) is a uniform integer
+ * distribution; the engine propagates {min, max, avg} through the formula, applying the same integer truncations to
+ * min and max, and exact (untruncated) linear arithmetic to avg. Products of independent random pieces (e.g. the random
+ * VIT DEF factor inside Ice Pick / Investigate) use the mean of each factor. No Monte-Carlo.
+ */
+(function (root, f) { const m = f(); if (typeof module === 'object' && module.exports) module.exports = m; else root.CalcBattle = m; })(typeof self !== 'undefined' ? self : this, function () {
+  'use strict';
+  const T = Math.trunc, MX = Math.max, MN = Math.min;
+  const num = x => (x && typeof x === 'object' ? +x.total || 0 : +x || 0);   // stat object {base,bonus,total} or plain number
+  const get = (m, k) => (m && +m[k]) || 0;                                   // numeric map lookup
+  const lvOf = b => (b === true ? 1 : +b || 0);                              // buff value -> level
+
+  // ---------- {min,max,avg} range arithmetic ----------
+  const R = (min, max, avg) => ({ min, max, avg: avg == null ? (min + max) / 2 : avg });
+  const rAdd = (a, b) => R(a.min + b.min, a.max + b.max, a.avg + b.avg);
+  const rSub = (a, v) => R(a.min - v.max, a.max - v.min, a.avg - v.avg);      // subtract a random range
+  const rK = (a, k) => R(a.min + k, a.max + k, a.avg + k);
+  const rMul = (a, n, d) => R(T(a.min * n / d), T(a.max * n / d), a.avg * n / d);       // ATK_RATE: x = x * n / d
+  const rRate = (a, p) => R(a.min + T(a.min * p / 100), a.max + T(a.max * p / 100), a.avg + a.avg * p / 100);  // ATK_ADDRATE: x += x * p / 100
+  const rLo = (a, m) => R(MX(a.min, m), MX(a.max, m), MX(a.avg, m));          // battle_min_damage
+  const rScale = (a, k) => R(a.min * k, a.max * k, a.avg * k);
+  const rPos = a => R(MX(0, a.min), MX(0, a.max), MX(0, a.avg));
+  const fmt1 = x => Math.round(x * 10) / 10;
+  const sgn = n => (n > 0 ? '+' : '') + n;
+  const fmtR = r => (r.min === r.max ? '' + r.min : r.min + ' - ' + r.max + ' (avg ' + fmt1(r.avg) + ')');
+  const out = r => ({ min: r.min, max: r.max, avg: r.avg });
+
+  // ---------- damage skill table ----------
+  // Ratios: src/map/skills/<lineage>/<skill>.cpp calculateSkillRatio (pre-re branch). ratio(r, lv, c): r = running skillratio
+  // (starts at 100 + Overthrust ...), returns the new ratio like `base_skillratio += x`. hit(h, lv, c) = modifyHitRate.
+  // hits(lv, base, c) overrides the CALCDATA hit count (modifyDamageData). Flags: noMast = battle_skill_stacks_masteries_vvs
+  // false (no refine / mastery / star crumb / spirit sphere / ATK%), arrow = needs ammo, req = weapon types from skill_db
+  // Requires.Weapon (CALCDATA has none), shield = needs a shield, pierce = is_attack_piercing value, crit = NK_CRITICAL.
+  const SK = {};
+  const def = (id, o) => { SK[id] = o; };
+  const SPEAR = ['1hSpear', '2hSpear'];
+
+  // swordman/bash.cpp
+  def('SM_BASH', { t: 'w', ratio: (r, l) => r + 30 * l, hit: (h, l) => h + T(h * 5 * l / 100) });
+  // swordman/magnum.cpp: inner 3x3 100%+20%/lv, outer 5x5 100%+10%/lv, hit +10%/lv
+  def('SM_MAGNUM', { t: 'w', ratio: (r, l, c) => r + (c.set.magnumOuter ? 10 : 20) * l, hit: (h, l) => h + T(h * 10 * l / 100),
+    note: 'Magnum Break is shown for the inner 3x3 ring (adjacent target); set settings.magnumOuter for the outer 5x5 ring.' });
+  // swordman/pierce.cpp: hit count = target size + 1
+  def('KN_PIERCE', { t: 'w', req: SPEAR, ratio: (r, l) => r + 10 * l, hit: (h, l) => h + T(h * 5 * l / 100), hits: (l, b, c) => c.tg.sizeIdx + 1 });
+  def('KN_SPEARSTAB', { t: 'w', req: SPEAR, ratio: (r, l) => r + 20 * l });
+  def('KN_SPEARBOOMERANG', { t: 'w', req: SPEAR, ratio: (r, l) => r + 50 * l });
+  // swordman/brandishspear.cpp (pre-re): 100+20*lv, the nearer zones add ratio/2, /4, /8 (first zone shown, wd->miscflag == 0)
+  def('KN_BRANDISHSPEAR', { t: 'w', req: SPEAR, riding: true, ratio: (r, l) => {
+    const q = 100 + 20 * l; r += -100 + q;
+    if (l > 3) r += T(q / 2); if (l > 6) r += T(q / 4); if (l > 9) r += T(q / 8); return r; },
+    note: 'Brandish Spear: damage of the target in the first (nearest) zone; needs a mount.' });
+  // Soulbound: Bowling Bash ratio 100 + 50*lv (settings.ep9BowlingBash: 100 + 90*lv), always exactly 1 hit, no gutter / 2nd hit.
+  def('KN_BOWLINGBASH', { t: 'w', ratio: (r, l, c) => r + (c.set.ep9BowlingBash ? 90 : 50) * l, hits: () => 1,
+    note: 'Soulbound: Bowling Bash is a single hit with linear scaling (100 + 50% per level; Ep 9: 100 + 90%).' });
+  // swordman/chargeattack.cpp (pre-re): +100% per 3 cells of distance, max +400%
+  def('KN_CHARGEATK', { t: 'w', ratio: (r, l, c) => r + 100 * MX(0, MN(4, T(((c.set.chargeDistance == null ? 13 : +c.set.chargeDistance) - 1) / 3))),
+    note: 'Charge Attack ratio grows with distance (assumed >= 13 cells = +400%; settings.chargeDistance).' });
+  // swordman/counterattack.cpp: +20% hit; NK_CRITICAL; auto_counter_type default BL_ALL = always critical (is_attack_critical)
+  def('KN_AUTOCOUNTER', { t: 'w', crit: true, alwaysCrit: true, hit: h => h + T(h * 20 / 100) });
+  def('CR_HOLYCROSS', { t: 'w', ratio: (r, l) => r + 35 * l });                                      // swordman/holycross.cpp
+  // swordman/shieldboomerang.cpp: base = batk + 4*shield refine + shield weight/10, DEF applied before the ratio
+  def('CR_SHIELDBOOMERANG', { t: 'w', shield: true, noMast: true, preDef: true, shieldBase: true, ratio: (r, l) => r + 30 * l });
+  def('CR_SHIELDCHARGE', { t: 'w', shield: true, ratio: (r, l) => r + 20 * l });                     // swordman/smite.cpp
+  def('MC_MAMMONITE', { t: 'w', ratio: (r, l) => r + 50 * l });                                      // merchant/mammonite.cpp
+  // Soulbound: Cart Revolution ratio 150 + 100 * min(cartWeight, 1000) / 1000 (upstream: 150 + cart weight %, same shape).
+  // battle_calc_element_damage: MC_CARTREVOLUTION is a forced-neutral skill (second attr_fix as Neutral) in pre-re as well.
+  def('MC_CARTREVOLUTION', { t: 'w', neutral2: true, noHilt: true, ratio: (r, l, c) => r + 50 + T(100 * MN(MX(+c.set.cartWeight || 0, 0), 1000) / 1000),
+    note: 'Soulbound: Cart Revolution ratio is 150% plus up to 100% by cart weight (settings.cartWeight, capped at 1000).' });
+  // thief/envenom.cpp: ratio 100, +15*lv after element (battle_calc_element_damage), attr_fix applied again
+  def('TF_POISON', { t: 'w', envenom: true });
+  def('TF_SPRINKLESAND', { t: 'w', ratio: r => r + 30 });                                            // thief/sandattack.cpp
+  // thief/sonicblow.cpp (pre-re): 200+50*lv, +10% of the running ratio with Sonic Acceleration, hit +50% with Sonic Acceleration
+  def('AS_SONICBLOW', { t: 'w', req: ['Katar'], ratio: (r, l, c) => { r += 200 + 50 * l; if (c.lv('AS_SONICACCEL') > 0) r += T(r / 10); return r; },
+    hit: (h, l, c) => (c.lv('AS_SONICACCEL') > 0 ? h + T(h * 50 / 100) : h),
+    note: 'Sonic Blow hits 8 times; the damage shown is the whole attack, split over the 8 hits.' });
+  // thief/grimtooth.cpp: +20*lv. Soulbound: Grimtooth uses the weapon element (incl. forged / endow / Enchant Poison).
+  def('AS_GRIMTOOTH', { t: 'w', req: ['Katar'], weaponEle: true, ratio: (r, l) => r + 20 * l });
+  // thief/venomsplasher.cpp (pre-re): +400+50*lv, +20*Poison React level
+  def('AS_SPLASHER', { t: 'w', ratio: (r, l, c) => r + 400 + 50 * l + 20 * c.lv('AS_POISONREACT') });
+  // thief/throwvenomknife.cpp (pre-re): ratio stays 100
+  def('AS_VENOMKNIFE', { t: 'w', arrow: true, note: 'Throw Venom Knife needs Venom Knife ammo; its ATK is not added in pre-renewal.' });
+  def('RG_BACKSTAP', { t: 'w', ratio: (r, l) => r + 200 + 40 * l });                                 // thief/backstab.cpp (bow penalty off by default)
+  def('RG_RAID', { t: 'w', ratio: (r, l) => r + 40 * l });                                           // thief/sightlessmind.cpp
+  def('RG_INTIMIDATE', { t: 'w', ratio: (r, l) => r + 30 * l });                                     // thief/snatch.cpp
+  // merchant/acidterror.cpp: -50+50*lv; ignores DEF; base ATK minus target VIT (battle_calc_skill_base_damage); no refine / mastery
+  def('AM_ACIDTERROR', { t: 'w', noMast: true, acid: true, ratio: (r, l) => r + (-50 + 50 * l) });
+  def('AM_DEMONSTRATION', { t: 'w', ratio: (r, l) => r + 20 * l });                                  // merchant/bomb.cpp
+  // archer: bow skills use BDMG_ARROW (min = DEX-min * ATK / 100, ammo ATK) when a bow is equipped
+  def('AC_DOUBLE', { t: 'w', req: ['Bow'], arrow: true, ratio: (r, l) => r + 10 * (l - 1) });
+  def('AC_SHOWER', { t: 'w', req: ['Bow'], arrow: true, ratio: (r, l) => r + (-25 + 5 * l) });
+  def('AC_CHARGEARROW', { t: 'w', req: ['Bow'], arrow: true, ratio: r => r + 50 });
+  def('HT_PHANTASMIC', { t: 'w', req: ['Bow'], arrow: true, ratio: r => r + 50 });
+  // archer/beaststrafing.cpp: -50 + 8*STR, only vs Brute / Insect
+  def('HT_POWER', { t: 'w', req: ['Bow'], arrow: true, races: ['Brute', 'Insect'], ratio: (r, l, c) => r + (-50 + 8 * num(c.st.str)) });
+  def('HT_FREEZINGTRAP', { t: 'w', arrow: true, trap: true });                                       // archer/freezingtrap.cpp: ratio 100, is_skill_using_arrow
+  // Musical Strike / Throw Arrow: -40+40*lv  => 100/140/180/220/260% (same on Soulbound)
+  def('BA_MUSICALSTRIKE', { t: 'w', req: ['Musical'], arrow: true, ratio: (r, l) => r + (-40 + 40 * l) });
+  def('DC_THROWARROW', { t: 'w', req: ['Whip'], arrow: true, ratio: (r, l) => r + (-40 + 40 * l) });
+  // acolyte (monk). asurastrike.cpp: 700 + SP*10, constant +250+150*lv (battle_calc_skill_constant_addition)
+  def('MO_EXTREMITYFIST', { t: 'w', noMast: true, ratio: (r, l, c) => MN(500000, r + 700 + 10 * c.sp), constAdd: l => 250 + 150 * l,
+    note: 'Asura Strike uses all SP: shown with settings.sp (default: max SP).' });
+  def('MO_INVESTIGATE', { t: 'w', noMast: true, pierce: 2, ratio: (r, l) => r + 75 * l });
+  def('MO_FINGEROFFENSIVE', { t: 'w', ratio: (r, l) => r + 50 * l, hits: (l, b, c) => MN(b, c.spheres) || 1,
+    note: 'Finger Offensive: the hit count is limited by the Spirit Spheres in the Call Spirits buff.' });
+  def('MO_BALKYOUNG', { t: 'w', ratio: r => r + 200 });
+  def('MO_TRIPLEATTACK', { t: 'w', ratio: (r, l) => r + 20 * l });
+  def('MO_CHAINCOMBO', { t: 'w', ratio: (r, l) => r + 50 + 50 * l });
+  def('MO_COMBOFINISH', { t: 'w', ratio: (r, l) => r + 140 + 60 * l });
+
+  // battle_calc_misc_attack (pre-re): base damage per skill
+  def('TF_THROWSTONE', { t: 'x', base: () => 50 });                                                  // md.damage = 50 for players
+  def('HT_LANDMINE', { t: 'x', trap: true, base: (l, c) => T(l * (num(c.st.dex) + 75) * (100 + num(c.st.int)) / 100) });
+  def('HT_BLASTMINE', { t: 'x', trap: true, base: (l, c) => T(l * (num(c.st.dex) / 2 + 50) * (100 + num(c.st.int)) / 100) });
+  def('HT_CLAYMORETRAP', { t: 'x', trap: true, base: (l, c) => T(l * (num(c.st.dex) / 2 + 75) * (100 + num(c.st.int)) / 100) });
+  def('HT_BLITZBEAT', { t: 'x', base: (l, c) => (T(num(c.st.dex) / 10) + T(num(c.st.int) / 2) + c.lv('HT_STEELCROW') * 3 + 40) * 2,
+    note: 'Blitz Beat needs a falcon; per-hit damage uses the Steel Crow level.' });
+  def('BA_DISSONANCE', { t: 'x', base: (l, c) => 30 + 10 * l + l * c.lv('BA_MUSICALLESSON') });
+
+  // battle_calc_magic_attack (pre-re)
+  def('MG_NAPALMBEAT', { t: 'm', ratio: (r, l) => r + (-30 + 10 * l) });
+  def('MG_SOULSTRIKE', { t: 'm', ratio: (r, l, c) => r + (c.tg.undead ? 5 * l : 0),
+    note: 'Soulbound: Soul Strike after-cast delay is ASPD-scaled; this DPS uses the rAthena delay.' });
+  def('MG_COLDBOLT', { t: 'm' });
+  def('MG_FIREBOLT', { t: 'm' });
+  def('MG_LIGHTNINGBOLT', { t: 'm' });
+  def('MG_FROSTDIVER', { t: 'm', ratio: (r, l) => r + 10 * l });
+  def('MG_FIREBALL', { t: 'm', ratio: (r, l) => r + (-30 + 10 * l), note: 'Fire Ball: centre target; the outer ring takes 75%.' });
+  // Thunder Storm: Duration1 100 ms with a 1000 ms unit interval (skill_db.yml): one wave per cast, HitCount = level bolts (no repeated ticks)
+  def('MG_THUNDERSTORM', { t: 'm', ratio: r => r - 20, note: 'Thunder Storm is a single wave of one bolt per level (its unit lasts 100 ms, shorter than its 1000 ms tick).' });
+  def('MG_FIREWALL', { t: 'm', ratio: r => r - 50 });
+  def('WZ_JUPITEL', { t: 'm' });
+  def('WZ_WATERBALL', { t: 'm', ratio: (r, l) => r + 30 * l, note: 'Water Ball: damage per ball; the ball count is not multiplied.' });
+  def('WZ_EARTHSPIKE', { t: 'm' });
+  def('WZ_FROSTNOVA', { t: 'm', ratio: (r, l) => r + (-100 + T((100 + l * 10) * 2 / 3)) });
+  def('WZ_HEAVENDRIVE', { t: 'm', note: "Heaven's Drive: one instant wave (its unit lasts 100 ms), one hit per level." });
+  def('WZ_METEOR', { t: 'm' });
+  def('WZ_VERMILION', { t: 'm', ratio: (r, l) => r + 20 * l - 20 });
+  def('WZ_STORMGUST', { t: 'm', ratio: (r, l) => r + 40 * l });
+  // mage/firepillar.cpp: -60+20*lv, constant +100+50*lv (MATK_ADD), ignores MDEF; for players the damage is divided by the hit count
+  def('WZ_FIREPILLAR', { t: 'm', ratio: (r, l) => r + (-60 + 20 * l), constAdd: l => 100 + 50 * l, hits: (l, b) => -b });
+  def('WZ_SIGHTRASHER', { t: 'm', ratio: (r, l) => r + 20 * l });
+  def('WZ_SIGHTBLASTER', { t: 'm' });
+  def('AL_HOLYLIGHT', { t: 'm', ratio: r => r + 25 });
+  def('PR_MAGNUS', { t: 'm', undeadOnly: true, undeadOrDemon: true, ratio: (r, l, c) => r + (c.tg.undead || c.tg.race === 'Demon' ? 30 : 0),
+    note: 'Magnus Exorcismus only damages Undead-element / Demon targets.' });
+  // Offensive heals: base damage = skill_calc_heal / Turn Undead formula, only against Undead element (skill_castend_nodamage_id)
+  def('AL_HEAL', { t: 'm', undeadOnly: true, base: (l, c) => T(T((c.st.baseLv + num(c.st.int)) / 8) * (4 + l * 8)),
+    note: 'Heal damages Undead-element targets only (the heal amount as holy damage).' });
+  def('PR_SANCTUARY', { t: 'm', undeadOnly: true, undeadOrDemon: true, base: l => (l > 6 ? 777 : l * 100), note: 'Sanctuary damages Undead / Demon targets only.' });
+  def('PR_TURNUNDEAD', { t: 'm', undeadOnly: true, turn: true, base: (l, c) => c.st.baseLv + num(c.st.int) + l * 10,
+    note: 'Turn Undead only works on Undead-element targets; non-boss targets can be killed outright (chance under extra).' });
+  def('CR_GRANDCROSS', { t: 'm', grand: true, ratio: (r, l) => r, note: 'Grand Cross: (weapon ATK + MATK) part; it also hurts the caster.' });
+
+  const DAMAGE_SKILLS = Object.keys(SK);
+
+  // ---------- generic helpers ----------
+  const SIZES = { Small: 0, Medium: 1, Large: 2 };
+  const attrRatio = (D, atk, defEle, elv) => {
+    const row = D.CALCDATA.attrFix[D.CALCDATA.attrFix[atk] ? atk : 'Neutral'];
+    const v = row && row[defEle] && row[defEle][MN(MX(elv, 1), 4) - 1];
+    return v == null ? 100 : v;
+  };
+  // battle_attr_fix (pre-re): damage = damage * ratio / 100
+  const attrFix = (D, r, atk, tg) => rMul(r, attrRatio(D, atk, tg.defEle, tg.defElv), 100);
+  // Sage field enchant (battle_attr_fix 528-553, pre-re): the attacker's SC_VOLCANO / VIOLENTGALE / DELUGE val3 = enchant_eff[(lv-1)%5] adds that % to
+  // Fire / Wind / Water damage BEFORE the element table (damage += damage * val3 / 100; damage = damage * ratio / 100). The ATK / FLEE / HP part needs the armor element, the enchant does not.
+  const FIELD = { Fire: 'SA_VOLCANO', Wind: 'SA_VIOLENTGALE', Water: 'SA_DELUGE' }, ENCH = [10, 14, 17, 19, 20];
+  const fieldPct = (c, ele) => { const lv = FIELD[ele] ? lvOf(c.buffs[FIELD[ele]]) : 0; return lv > 0 ? ENCH[(lv - 1) % 5] : 0; };
+  const attrFixC = (c, r, atk, tg) => { const p = fieldPct(c, atk); return attrFix(c.D, p ? rRate(r, p) : r, atk, tg); };
+  const mergeMap = (a, b) => { const o = Object.assign({}, a); for (const k in b) o[k] = (+o[k] || 0) + (+b[k] || 0); return o; };
+  const mergeFlag = (a, b) => Object.assign({}, a, b);
+  const mergeBonus = (a, b) => ({ addRace: mergeMap(a.addRace, b.addRace), addEle: mergeMap(a.addEle, b.addEle), addSize: mergeMap(a.addSize, b.addSize),
+    addClass: mergeMap(a.addClass, b.addClass), addMob: mergeMap(a.addMob, b.addMob), addRace2: mergeMap(a.addRace2, b.addRace2), ignoreDefRace: mergeFlag(a.ignoreDefRace, b.ignoreDefRace),
+    ignoreDefClass: mergeFlag(a.ignoreDefClass, b.ignoreDefClass), defRatioAtkRace: mergeFlag(a.defRatioAtkRace, b.defRatioAtkRace),
+    defRatioAtkClass: mergeFlag(a.defRatioAtkClass, b.defRatioAtkClass), noSizeFix: a.noSizeFix || b.noSizeFix });
+  const matchFlag = (m, k) => !!(m && (m[k] || m.All));
+  const SCOPED = ['addRace', 'addEle', 'addSize', 'addClass', 'addMob', 'addRace2', 'ignoreDefRace', 'ignoreDefClass', 'defRatioAtkRace', 'defRatioAtkClass'];
+
+  // ---------- Target ----------
+  // Monster race groups (RC2_*, mob_db.yml RaceGroups): CALCDATA.race2.mobs[AEGIS_KEY] = ['Orc', ...]; [] for a mob without groups.
+  const race2Of = (key, D) => {
+    const r2 = D && D.CALCDATA && D.CALCDATA.race2;
+    return key && r2 && r2.mobs && Object.prototype.hasOwnProperty.call(r2.mobs, key) ? r2.mobs[key] : [];
+  };
+  // targetFromMob(mob, D?): D (the {CALCDATA} bundle) is optional; without it Target.race2 is left out and compute() looks it up
+  // from target.mobKey through D.CALCDATA.race2 (a custom Target may carry its own `race2: ['Orc', ...]`).
+  const targetFromMob = (mob, D) => {
+    const s = mob.stats || {};
+    const t = { name: mob.name || mob.key || '', lv: +mob.lv || 1, hp: +mob.hp || 0, def: +mob.def || 0, mdef: +mob.mdef || 0,
+      vit: +s.VIT || 0, int: +s.INT || 0, agi: +s.AGI || 0, dex: +s.DEX || 0, luk: +s.LUK || 0,
+      element: mob.element || 'Neutral', elv: +mob.elv || 1, race: mob.race || 'Formless', size: mob.size || 'Medium',
+      boss: !!mob.cls && mob.cls !== 'Normal', mobKey: mob.key || null, debuffs: {} };
+    if (Array.isArray(mob.race2)) t.race2 = mob.race2.slice();
+    else if (D && D.CALCDATA) t.race2 = race2Of(mob.key, D).slice();
+    return t;
+  };
+  // Target after debuffs (status.cpp status_calc_def / _def2 / _agi / _mdef / _element). Monster pre-re: DEF2 = VIT,
+  // MDEF2 = INT + VIT/2, FLEE = level + AGI (status_calc_misc).
+  const effTarget = tg => {
+    const d = tg.debuffs || {};
+    let def1 = tg.def, def2 = tg.vit, agi = tg.agi, mdef = tg.mdef;
+    if (d.stone) def1 = T(def1 / 2);                                                      // SC_STONE
+    if (d.frozen) def1 = T(def1 / 2);                                                     // SC_FREEZE
+    if (d.signum > 0) def1 -= T(def1 * (10 + 4 * d.signum) / 100);                         // SC_SIGNUMCRUCIS val2 = 10 + 4*lv
+    if (d.provoke > 0) def1 -= T(def1 * (5 + 5 * d.provoke) / 100);                        // SC_PROVOKE val3 = 5 + 5*lv (not players)
+    if (d.stripShield) def1 -= T(def1 * 15 / 100);                                         // SC_STRIPSHIELD val2 = 15 (monsters, status.cpp:10972-10975), status_calc_def 7806
+    // Strip Armor / Helm (status.cpp:10976-10983, 6933-6934, 7016-7017): monster VIT / INT -40%. The monster's DEF2 / MDEF2 follow by the stat delta
+    // (status_calc_bl_main 6041-6056, 6073-6078: def2 = b_def2 + (vit - b_vit), mdef2 = b_mdef2 + (int - b_int) + (vit - b_vit) / 2).
+    const vitD = d.stripArmor ? -T(tg.vit * 40 / 100) : 0, intD = d.stripHelm ? -T(tg.int * 40 / 100) : 0;
+    def2 += vitD;
+    if (d.provoke > 0) { def2 -= T(def2 * (5 + 5 * d.provoke) / 100); def2 = MX(def2, 1); }   // status_calc_def2 (recalculated: min 1)
+    if (d.eternalChaos) def2 = 0;                                                          // SC_ETERNALCHAOS: status_calc_def2 returns 0 (7868, also pre-renewal); hard DEF only in renewal (7756)
+    if (d.decagi > 0) agi -= 2 + d.decagi;                                                // SC_DECREASEAGI val2 = 2 + lv
+    if (d.quagmire > 0) agi -= 10 * d.quagmire;                                           // SC_QUAGMIRE val2 = 10*lv (monsters)
+    agi = MX(agi, 0);
+    if (d.stone) mdef += T(25 * mdef / 100);                                              // status_calc_mdef: Stone / Freeze +25%
+    if (d.frozen) mdef += T(25 * mdef / 100);
+    const defEle = d.frozen ? 'Water' : d.stone ? 'Earth' : tg.element;                    // status_calc_element / _lv: Freeze = Water 1, Stone = Earth 1
+    const defElv = d.frozen || d.stone ? 1 : tg.elv;
+    return Object.assign({}, tg, { def1, def2, mdef2: tg.int + T(tg.vit / 2) + intD + T(vitD / 2), mdefE: mdef, flee: MX(1, tg.lv + agi), defEle, defElv,
+      sizeIdx: SIZES[tg.size] == null ? 1 : SIZES[tg.size], cls: tg.boss ? 'Boss' : 'Normal', undead: defEle === 'Undead',   // undead_detect_type 0: element only
+      alwaysHit: !!(d.stone || d.frozen), lex: !!d.lex });                                 // is_attack_hitting: opt1 (stone / freeze) always hit
+  };
+
+  // ---------- context ----------
+  const mkCtx = (st, tgt, skill, D, set) => {
+    const id = skill && skill.id, cd = id ? D.CALCDATA.skills[id] : null, sk = id ? SK[id] : null;
+    const slv = id ? MX(1, MN(skill.lv | 0 || 1, (cd && cd.maxLv) || 99)) : 0;
+    const c = { st, tg: effTarget(tgt), raw: tgt, skill, D, set, id, slv, cd, sk, basic: !id, flags: (cd && cd.flags) || {}, buffs: st.buffs || {}, notes: [],
+      lv: x => get(st.skills, x), sp: set.sp != null ? +set.sp : num(st.maxsp), spheres: MX(0, T(+(st.buffs && st.buffs.MO_CALLSPIRITS) || 0)) };
+    c.tg.race2 = Array.isArray(tgt.race2) ? tgt.race2 : race2Of(tgt.mobKey, D);                // status_get_race2(target): groups of the monster
+    // hand-scoped bonus maps (Status.right.bonus / left.bonus); a map missing there falls back to the merged Status.bonus
+    const scoped = (b, fb) => { const o = {}; for (const k of SCOPED) o[k] = b && b[k] !== undefined ? b[k] : fb[k]; o.noSizeFix = !!(b && b.noSizeFix); return o; };
+    const rb = scoped(st.right && st.right.bonus, st.bonus || {}), lb = st.left && st.left.bonus ? scoped(st.left.bonus, {}) : {};
+    // battle.conf left_cardfix_to_right (player.conf says yes, source default 0): Soulbound default = separate buckets
+    c.toRight = !!set.leftCardfixToRight;
+    c.hb = { right: c.toRight && st.left ? mergeBonus(rb, lb) : rb, left: c.toRight ? {} : lb };
+    return c;
+  };
+  const sbonus = c => c.st.bonus || {};
+  const weaponOk = (st, sk) => !sk.req || sk.req.indexOf(st.right ? st.right.type : 'Fist') >= 0;
+  const cdAt = (c, key, dflt) => (c.cd && c.cd[key] && c.cd[key][c.slv - 1] != null ? c.cd[key][c.slv - 1] : dflt);
+
+  // ---------- hit / crit ----------
+  // is_attack_hitting (pre-re): hitrate = 80 + HIT - FLEE, skill modifyHitRate, Weaponry Research, clamp min_hitrate 5 .. max_hitrate 100
+  const hitChance = (c, bonusPct) => {
+    if (c.flags.IgnoreFlee || c.tg.alwaysHit) return 1;
+    let h = 80 + num(c.st.hit) - c.tg.flee;
+    if (c.sk && c.sk.hit) h = c.sk.hit(h, c.slv, c);
+    if (bonusPct) h += bonusPct;                                    // Double Attack: + TF_DOUBLE level
+    const wr = c.lv('BS_WEAPONRESEARCH');
+    if (wr > 0) h += T(h * (2 * wr) / 100);                          // Weaponry Research hidden bonus
+    return MN(100, MX(5, h)) / 100;
+  };
+  // is_attack_critical (pre-re): rnd()%1000 < cri; cri = status.cri*10 + critAddRace*10 - target LUK*2 (Status.cri includes the katar x2)
+  const critChance = c => {
+    if (c.sk && !c.sk.crit) return 0;
+    if (c.sk && c.sk.alwaysCrit) return 1;                           // auto_counter_type default BL_ALL
+    const cr = num(c.st.cri);
+    if (!cr) return 0;
+    const ca = sbonus(c).critAddRace;
+    const cri = cr * 10 + (get(ca, c.tg.race) + get(ca, 'All')) * 10 - c.tg.luk * 2;
+    return MN(1, MX(0, cri / 1000));
+  };
+
+  // ---------- weapon attack ----------
+  const handInfo = (c, hn) => (hn === 'left' ? c.st.left : c.st.right);
+  // battle_get_weapon_element (skill element Weapon / Endowed = weapon element, left hand uses its own weapon)
+  const elementOf = (c, hn) => {
+    let e = c.basic ? 'Weapon' : cdAt(c, 'element', 'Neutral');
+    if (e === 'Weapon' || e === 'Endowed' || (c.sk && c.sk.weaponEle)) {                    // Soulbound: Grimtooth uses the weapon element
+      const h = handInfo(c, hn); e = (h && h.element) || 'Neutral';
+      const am = c.st.ammo;                                                               // arrow element (Status resolves it for bows)
+      if (c.sk && c.sk.arrow && c.st.right && c.st.right.type !== 'Bow' && am && am.element && am.element !== 'Neutral' && hn === 'right') e = am.element;
+    }
+    if (e === 'Random') { c.notes.push('Random element skill: shown as Neutral.'); e = 'Neutral'; }
+    return e;
+  };
+  // battle_addmastery (pre-re): masteries are added after DEF
+  const mastery = (c, hn) => {
+    const st = c.st, tg = c.tg, h = handInfo(c, hn), L = c.lv;
+    let d = 0, s;
+    if ((s = L('AL_DEMONBANE')) > 0 && (tg.undead || tg.race === 'Demon')) d += T(s * (st.baseLv / 20 + 3));
+    if ((s = L('HT_BEASTBANE')) > 0 && (tg.race === 'Insect' || tg.race === 'Brute')) d += s * 4;
+    switch (h ? h.type : 'Fist') {
+      case '1hSword': case 'Dagger': if ((s = L('SM_SWORD')) > 0) d += s * 4; break;
+      case '2hSword': if ((s = L('SM_TWOHAND')) > 0) d += s * 4; break;
+      case '1hSpear': case '2hSpear': if ((s = L('KN_SPEARMASTERY')) > 0) d += s * (c.st.riding ? 5 : 4); break;      // battle.cpp:2350: x5 when mounted (Status.riding: settings.riding and KN_RIDING learned)
+      case '1hAxe': case '2hAxe': if ((s = L('AM_AXEMASTERY')) > 0) d += s * 3; break;
+      case 'Mace': if ((s = L('PR_MACEMASTERY')) > 0) d += s * 3; break;
+      case 'Fist': case 'Knuckle': if ((s = L('MO_IRONHAND')) > 0) d += s * 3; break;
+      case 'Musical': if ((s = L('BA_MUSICALLESSON')) > 0) d += s * 3; break;
+      case 'Whip': if ((s = L('DC_DANCINGLESSON')) > 0) d += s * 3; break;
+      case 'Book': if ((s = L('SA_ADVANCEDBOOK')) > 0) d += s * 3; break;
+      case 'Katar': if ((s = L('AS_KATAR')) > 0) d += s * 3; break;
+    }
+    return d;
+  };
+  // status.cpp: forged weapon star crumbs (5 each, 3 crumbs = +40)
+  const starDmg = h => { const s = ((h && +h.starCrumbs) || 0) * 5; return s >= 15 ? 40 : s; };
+
+  // battle_calc_base_damage (pre-re) for one hand; crit = BDMG_CRIT
+  const baseDamage = (c, hn, crit) => {
+    const st = c.st, h = handInfo(c, hn), type = h ? h.type : 'Fist';
+    let atkmax = h ? +h.watk || 0 : 0, atkmin = 0;
+    const hasW = !!h && type !== 'Fist';
+    const arrow = type === 'Bow' && (c.basic || !!(c.sk && c.sk.arrow));
+    if (!crit || arrow) {
+      atkmin = num(st.dex);
+      if (hasW) atkmin = T(atkmin * (80 + (h.wlv || 1) * 20) / 100);
+      if (atkmin > atkmax) atkmin = atkmax;
+      if (arrow) { atkmin = T(atkmin * atkmax / 100); if (atkmin > atkmax) atkmax = atkmin; }   // bows: min = min*max/100
+    }
+    if (c.buffs.BS_MAXIMIZE) atkmin = atkmax;                                                     // SC_MAXIMIZEPOWER
+    let d = crit ? R(atkmax, atkmax) : (atkmax > atkmin ? R(atkmin, atkmax - 1) : R(atkmin, atkmin));   // (rnd()%(max-min))+min
+    const ammo = (c.st.ammo && +c.st.ammo.atk) || 0;
+    if (arrow && ammo) d = rAdd(d, crit ? R(ammo, ammo) : R(0, ammo - 1));                        // arrow_atk: rnd()%arrow_atk (crit: full)
+    const noSize = c.buffs.BS_WEAPONPERFECT || (st.bonus && st.bonus.noSizeFix) || (h && h.bonus && h.bonus.noSizeFix);
+    if (!noSize) {                                                                                // size fix on weapon ATK only
+      const row = c.D.CALCDATA.sizeFix[type];
+      let sz = c.tg.size;
+      if (c.st.riding && (type === '1hSpear' || type === '2hSpear') && sz === 'Medium') sz = 'Large';   // status.cpp:4238-4244: mounted with a spear, Medium counts as Large
+      d = rMul(d, row && row[sz] != null ? row[sz] : 100, 100);
+    }
+    d = rK(d, num(st.batk));                                                                      // + status base ATK (after size fix)
+    if (h && h.overMax > 0) d = rAdd(d, R(1, h.overMax));                                         // battle_add_weapon_damage: rnd()%overrefine + 1
+    if (crit && +st.critAtkRate > 0) d = rRate(d, +st.critAtkRate);                               // crit_atk_rate (pre-re: before the skill ratio)
+    return d;
+  };
+  // battle_calc_cardfix BF_WEAPON, attacker side (pre-re): per-category multiplication on a base of 1000
+  const isLong = c => {
+    if (c.sk && c.sk.trap) return false;
+    if (c.basic) return !!c.st.right && c.st.right.type === 'Bow';
+    const r = cdAt(c, 'range', 1), t = c.st.right ? c.st.right.type : 'Fist';
+    return (r < 0 ? (t === 'Bow' ? 9 : /Spear/.test(t) ? 3 : 1) - (r + 1) : r) >= 4;           // battle_range_type: skill range < 4 = short
+  };
+  // arrow_atk (battle.cpp:7163): a bow attack (basic or an ammo skill)
+  const isArrowAtk = c => !!c.st.right && c.st.right.type === 'Bow' && (c.basic || !!(c.sk && c.sk.arrow));
+  // info (optional array) receives the race group part: { groups: [[name, %]], factor } for the breakdown
+  const cardfixRatio = (c, hn, ignoreEle, info) => {
+    const b = c.hb[hn] || {}, tg = c.tg;
+    let f = 1000;
+    f = T(f * (100 + get(b.addRace, tg.race) + get(b.addRace, 'All')) / 100);
+    if (!ignoreEle) f = T(f * (100 + get(b.addEle, tg.defEle) + get(b.addEle, 'All')) / 100);
+    f = T(f * (100 + get(b.addSize, tg.size) + get(b.addSize, 'All')) / 100);
+    // addrace2 (bAddRace2, monster race groups), battle.cpp:966-968 (bow: the groups are summed, one step) and 993-994 / 1050-1051 (melee:
+    // one multiplication per group the target belongs to), between size and class
+    const g2 = (tg.race2 || []).map(g => [g, get(b.addRace2, g)]).filter(x => x[1]);
+    if (g2.length) {
+      const f0 = f;
+      if (isArrowAtk(c)) f = T(f * (100 + g2.reduce((s, x) => s + x[1], 0)) / 100);
+      else for (const x of g2) f = T(f * (100 + x[1]) / 100);
+      if (info) info.push({ groups: g2, factor: f / f0 });
+    }
+    f = T(f * (100 + get(b.addClass, tg.cls) + get(b.addClass, 'All')) / 100);
+    if (tg.mobKey && b.addMob && b.addMob[tg.mobKey]) f = T(f * (100 + b.addMob[tg.mobKey]) / 100);   // add_dmg by monster class
+    if (isLong(c)) f = T(f * (100 + (+c.st.longAtkRate || 0)) / 100);                              // BF_LONG: long_attack_atk_rate
+    return f;
+  };
+  // APPLY_CARDFIX: damage -= damage * (1000 - max(0, fix)) / 1000
+  const applyFix = (r, f) => { const g = x => x - T(x * (1000 - MX(0, f)) / 1000); return R(g(r.min), g(r.max), r.avg - r.avg * (1000 - MX(0, f)) / 1000); };
+
+  // battle_calc_defense_reduction (pre-re), monster target: damage * (100 - def1) / 100 - vit_def; vit_def = VIT + rnd()%((VIT/20)^2)
+  const vitDefRange = v => { const m = T(v / 20) * T(v / 20); return R(v, m > 0 ? v + m - 1 : v); };
+  const defPiercing = (c, hn, crit) => {                                                         // is_attack_piercing: Investigate = 2, Ice Pick = 1
+    if (crit) return 0;
+    if (c.sk && c.sk.pierce) return c.sk.pierce;
+    const b = c.hb[hn] || {};
+    return matchFlag(b.defRatioAtkRace, c.tg.race) || matchFlag(b.defRatioAtkClass, c.tg.cls) ? 1 : 0;
+  };
+  const ignoresDef = (c, hn, crit) => {                                                          // attack_ignores_def
+    if (crit) return true;                                                                       // pre-re: criticals ignore DEF
+    if (c.flags.IgnoreDefense) return true;
+    const b = c.hb[hn] || {};
+    return matchFlag(b.ignoreDefRace, c.tg.race) || matchFlag(b.ignoreDefClass, c.tg.cls);
+  };
+  const defReduce = (c, hn, crit, d, bd, label) => {
+    const v = vitDefRange(c.tg.def2), def1 = MN(c.tg.def1, 100);                                 // if (def1 > 100) def1 = 100
+    if (ignoresDef(c, hn, crit)) { if (bd) bd.push({ label: label + ' (DEF ignored)', value: fmtR(d) }); return d; }
+    const p = defPiercing(c, hn, crit);
+    const r = p ? R(T(d.min * p * (def1 + v.min) / 100), T(d.max * p * (def1 + v.max) / 100), d.avg * p * (def1 + v.avg) / 100)   // ATK_RATE(piercing*(def1+vit_def))
+      : rSub(rMul(d, 100 - def1, 100), v);
+    if (bd) bd.push({ label: label + (p ? ' (DEF pierce x' + p + ')' : ' (DEF ' + def1 + '%, VIT DEF ' + v.min + '-' + v.max + ')'), value: fmtR(r) });
+    return r;
+  };
+
+  // One hand, one attack kind (normal / critical). Returns the damage range before the hit-count (div) fix.
+  const handDamage = (c, hn, crit, bd) => {
+    const st = c.st, tg = c.tg, sk = c.sk, h = handInfo(c, hn), lo = hn === 'right' ? 1 : 0;
+    const L = (l, r) => { if (bd) bd.push({ label: l, value: fmtR(r) }); };
+    const noMast = !!(sk && sk.noMast), refine = h ? +h.refineAtk || 0 : 0;
+    // battle_calc_skill_base_damage: base ATK
+    let d = baseDamage(c, hn, crit), bsd = d;                                                    // bsd = basedamage chain (Magnum Break bonus)
+    if (sk && sk.shieldBase) d = R(num(st.batk), num(st.batk));                                  // Shield Boomerang: batk + 4*refine + weight/10 (shield data not in Status)
+    if (sk && sk.acid) d = rK(d, -tg.def2);                                                      // Acid Terror: base ATK - target DEF2 (VIT)
+    L((crit ? 'Critical ' : '') + 'base ATK (variance, size fix, status ATK, over-upgrade)', d);
+    // battle_calc_attack_skill_ratio: 100 + Overthrust + Poison React + skill file ratio
+    let ratio = 100;
+    const ot = lvOf(c.buffs.BS_OVERTHRUST); if (ot) ratio += 5 * ot;                             // SC_OVERTHRUST val3 = 5*lv (self cast)
+    if ((c.basic || c.id === 'KN_AUTOCOUNTER') && c.buffs.AS_POISONREACT) ratio += 30 * (c.lv('AS_POISONREACT') || lvOf(c.buffs.AS_POISONREACT));
+    if (sk && sk.ratio) ratio = sk.ratio(ratio, c.slv, c);
+    if (sk && sk.preDef) d = defReduce(c, hn, crit, d, bd, 'DEF before ratio');                  // Shield Boomerang: DEF is applied before the ratio
+    if (ratio !== 100) { d = rMul(d, ratio, 100); L('Skill ratio ' + ratio + '%', d); }
+    // battle_calc_skill_constant_addition
+    const ca = sk && sk.constAdd ? sk.constAdd(c.slv, c) : 0;
+    if (ca) { d = rK(d, ca); L('Constant skill damage +' + ca, d); }
+    const sa = c.id ? get(sbonus(c).skillAtk, c.id) : 0;                                         // pc_skillatk_bonus
+    if (sa) { d = rRate(d, sa); L('Skill damage bonus +' + sa + '%', d); }
+    // battle_attack_sc_bonus: ATK% (pre-re multiplicative, after the ratio, before DEF; 100 for noMast skills)
+    const pct = noMast ? 100 : (+c.st.atkRate || 100);
+    if (pct !== 100) { d = rMul(d, pct, 100); bsd = rMul(bsd, pct, 100); L('ATK% (status effects) ' + pct + '%', d); }
+    if (!(sk && sk.preDef)) d = defReduce(c, hn, crit, d, bd, 'After DEF');
+    if (c.buffs.SM_MAGNUM) { const v = vitDefRange(tg.def2); bsd = rSub(rMul(bsd, 100 - MN(tg.def1, 100), 100), v); }
+    // battle_calc_attack_post_defense: refine bonus (rhw.atk2), min 1; battle_calc_attack_masteries (battle_addmastery)
+    if (!noMast) { d = rK(d, refine); bsd = rK(bsd, refine); L('+ refine bonus ' + refine, d); }
+    d = rLo(d, lo); bsd = rLo(bsd, 1);
+    if (!noMast) { const m = mastery(c, hn); d = rK(d, m); bsd = rK(bsd, m); if (m) L('+ masteries ' + m, d); d = rLo(d, lo); }
+    // battle_calc_element_damage: attr_fix, then the non-elemental additions
+    const ele = elementOf(c, hn);
+    if (!c.flags.IgnoreElement) { d = attrFixC(c, d, ele, tg); L('Element ' + ele + ' vs ' + tg.defEle + ' ' + tg.defElv + ' (' + attrRatio(c.D, ele, tg.defEle, tg.defElv) + '%)' + (fieldPct(c, ele) ? ' +' + fieldPct(c, ele) + '% field enchant' : ''), d); }
+    if (sk && sk.neutral2 && !c.flags.IgnoreElement) { d = attrFixC(c, d, 'Neutral', tg); L('Forced-neutral second attr_fix (Cart Revolution)', d); }
+    const star = noMast ? 0 : starDmg(h), sph = noMast ? 0 : c.spheres * 3;                       // Star Crumbs, Spirit Spheres (3 each): after attr_fix
+    if (star) { d = rK(d, star); L('+ Star Crumbs ' + star, d); }
+    if (sph) { d = rK(d, sph); L('+ Spirit Spheres ' + sph, d); }
+    if (sk && sk.envenom && !noMast) { d = rK(d, 15 * c.slv); d = attrFixC(c, d, ele, tg); L('Envenom +' + 15 * c.slv + ', element applied again', d); }
+    if (c.buffs.SM_MAGNUM && hn === 'right' && !c.flags.IgnoreElement && !c.flags.IgnoreAtkCard) {   // SC_WATK_ELEMENT (Magnum Break): +20% of the normal attack as Fire
+      const b2 = rK(attrFixC(c, bsd, 'Fire', tg), star + sph);
+      d = rAdd(d, rMul(b2, 20, 100)); L('Magnum Break fire bonus (+20% of the normal attack as Fire)', d);
+    }
+    d = rLo(d, lo);
+    // battle_calc_weapon_attack: Weaponry Research +2/lv, Hilt Binding +4 (not Cart Revolution)
+    const wr = c.lv('BS_WEAPONRESEARCH'); if (wr > 0) { d = rK(d, wr * 2); L('+ Weaponry Research ' + wr * 2, d); }
+    if (c.lv('BS_HILTBINDING') > 0 && !(sk && sk.noHilt)) { d = rK(d, 4); L('+ Hilt Binding 4', d); }
+    // battle_calc_cardfix (attacker): race, element, size, class multiplied
+    if (!c.flags.IgnoreAtkCard) {
+      const info = [], f = cardfixRatio(c, hn, !!c.flags.IgnoreElement, info);
+      if (f !== 1000) { d = applyFix(d, f); L('Cards / bonuses x' + (f / 1000).toFixed(3), d); }
+      if (bd && info.length) bd.push({ label: 'Monster race group cards (' + info[0].groups.map(x => x[0] + ' ' + sgn(x[1]) + '%').join(', ') + '): own step, included above', value: 'x' + info[0].factor.toFixed(3) });
+    }
+    return d;
+  };
+
+  // battle_apply_div_fix: DAMAGE_DIV_FIX (positive: every hit deals the full damage, negative: the damage is split)
+  const divFix = (r, n) => {
+    if (n < 0) { const m = -n; return { total: R(T(r.min / m) * m, T(r.max / m) * m, r.avg), per: R(T(r.min / m), T(r.max / m), r.avg / m), n: m }; }
+    return { total: rScale(r, n), per: r, n };
+  };
+
+  // battle_calc_weapon_attack
+  const weaponAttack = c => {
+    const st = c.st, sk = c.sk, bd = [], notes = c.notes, tg = c.tg;
+    const r = st.right || { type: 'Fist', wlv: 0, watk: 0, refineAtk: 0, overMax: 0, element: 'Neutral', starCrumbs: 0, bonus: {} };
+    const l = st.left;
+    const katar = r.type === 'Katar';
+    const dual = c.basic && !!l && l.type !== 'Katar';                                            // is_attack_left_handed (skills use the right hand only)
+    const rightOn = !(c.basic && r.type === 'Fist' && l && l.type !== 'Fist');                    // is_attack_right_handed
+    const baseHits = cdAt(c, 'hits', 1);
+    const n = c.basic ? 1 : (sk.hits ? sk.hits(c.slv, baseHits, c) : baseHits);
+    const blocked = !!(sk && sk.races && sk.races.indexOf(tg.race) < 0);                          // Beast Strafing: Brute / Insect only
+    if (blocked) notes.push('This skill only damages ' + sk.races.join(' / ') + ' targets: no damage to this target.');
+    const forced = !!(sk && sk.alwaysCrit);
+    const pCrit = c.basic || (sk && sk.crit) ? critChance(c) : 0;
+    const daLv = c.basic && r.type === 'Dagger' ? c.lv('TF_DOUBLE') : 0;                         // battle_calc_multi_attack: TF_DOUBLE with a dagger
+    const pDA = daLv > 0 ? MN(5 * daLv, 100) / 100 : 0;
+    const hit = forced ? 1 : hitChance(c, 0), hitDA = daLv > 0 ? hitChance(c, daLv) : hit;
+
+    const run = (isCrit, rec) => {
+      const o = {}, b = rec ? bd : null;
+      const right = rightOn ? handDamage(c, 'right', isCrit, b) : R(0, 0);
+      let left = dual ? handDamage(c, 'left', isCrit, null) : null;
+      const dv = divFix(right, n);
+      let rd = dv.total, per = dv.per;
+      if (katar && c.basic) {                                                                    // battle_calc_attack_left_right_hands: damage2 = damage * (1 + 2*TF_DOUBLE) / 100
+        const k = 1 + 2 * c.lv('TF_DOUBLE');
+        o.katar = R(T(rd.min * k / 100), T(rd.max * k / 100), rd.avg * k / 100);
+      }
+      if (dual && /^(Thief|Assassin|Rogue)$/.test(st.job)) {                                      // AS_RIGHT 50+10*lv %, AS_LEFT 30+10*lv %
+        rd = rLo(rMul(rd, 50 + 10 * c.lv('AS_RIGHT'), 100), 1);
+        left = rLo(rMul(left, 30 + 10 * c.lv('AS_LEFT'), 100), 1);
+        per = rd;
+      }
+      const lx = x => (tg.lex ? rScale(x, 2) : x);                                               // battle_calc_damage: Lex Aeterna doubles
+      o.right = lx(rd); o.per = lx(per); o.left = left ? lx(left) : null; if (o.katar) o.katar = lx(o.katar);
+      o.n = dv.n;
+      return o;
+    };
+    const norm = run(forced, true);
+    const critO = !forced && pCrit > 0 ? run(true, false) : null;
+    const sum = o => (o.left ? rAdd(o.right, o.left) : o.right);
+    const rawTotal = sum(norm);
+    if (rawTotal.max < 0) notes.push('The target absorbs this element (damage <= 0).');
+    const zero = R(0, 0), keep = x => (blocked ? zero : rPos(x));
+    const total = keep(rawTotal);
+    const katar2 = norm.katar ? keep(norm.katar) : null;
+    const critTotal = critO ? keep(sum(critO)) : null;
+    const nAll = total.avg + (katar2 ? katar2.avg : 0);
+    const cAll = critO ? critTotal.avg + (critO.katar ? MX(0, critO.katar.avg) : 0) : 0;
+    const pc = critO ? pCrit : 0;
+    const daAll = daLv > 0 ? 2 * norm.right.avg + (norm.left ? norm.left.avg : 0) : 0;            // Double Attack: right hand x2 (div_ = 2)
+    const avgAtk = blocked ? 0 : pDA * hitDA * daAll + (1 - pDA) * (pc * cAll + (1 - pc) * hit * nAll);   // crits always hit; DA overrides crit
+    const extra = [];
+    if (katar2) extra.push(Object.assign({ label: 'Katar 2nd hit (' + (1 + 2 * c.lv('TF_DOUBLE')) + '% of the 1st)', chance: 1 }, out(katar2)));
+    if (daLv > 0) {
+      const e = rScale(norm.right, 2);
+      if (norm.left) { e.min += norm.left.min; e.max += norm.left.max; e.avg += norm.left.avg; }
+      extra.push(Object.assign({ label: 'Double Attack (x2 hits)', chance: pDA }, out(e)));
+    }
+    const hands = dual ? [Object.assign({ hand: 'right' }, out(norm.right)), Object.assign({ hand: 'left' }, out(norm.left))] : null;
+    let avgFinal = avgAtk, cycle = null;
+    if (c.basic && !blocked) {                                                                    // passive procs of the basic attack
+      const pAny = pDA * hitDA + (1 - pDA) * (pc + (1 - pc) * hit);                               // P(the attack lands: crits always hit)
+      const pr = procExtras(c, pAny);
+      for (const e of pr.rows) extra.push(e);
+      avgFinal = pr.keep * avgAtk + pr.tripleAvg + pr.add;
+      cycle = pr.cycle;
+    }
+    return { kind: 'weapon', n: norm.n, per: keep(norm.per), total, hands, extra, crit: critO ? Object.assign({ chance: pCrit }, out(critTotal)) : null,
+      hit, avgAtk: avgFinal, perCast: nAll, bd, ele: elementOf(c, 'right'), forced, cycle };
+  };
+
+  // ---------- passive procs on the basic attack ----------
+  // Hindsight (SA_AUTOSPELL) spell menu / level cap: skill.cpp:10710-10727 (pre-re skill_autospell) + skills/mage/hindsight.cpp:25-44 for the menu thresholds
+  const HINDSIGHT = { MG_NAPALMBEAT: [1, () => 3], MG_COLDBOLT: [2, l => MN(3, l - 1)], MG_FIREBOLT: [2, l => MN(3, l - 1)], MG_LIGHTNINGBOLT: [2, l => MN(3, l - 1)],
+    MG_SOULSTRIKE: [5, l => MN(3, l - 4)], MG_FIREBALL: [8, l => MN(2, l - 7)], MG_FROSTDIVER: [10, () => 1] };
+  const procExtras = (c, pAny) => {
+    const st = c.st, rows = [], notes = c.notes, cd = c.D.CALCDATA.skills, ctxOf = (id, lv) => mkCtx(st, c.raw, { id, lv }, c.D, c.set);
+    let keep = 1, tripleAvg = 0, add = 0, cycle = null;
+    // Triple Attack (battle.cpp:7267-7284, pre-re): chance 30 - lv %, before the normal attack; when it procs skill_attack(MO_TRIPLEATTACK) replaces the hit,
+    // and canact_tick = tick + skill_delayfix (1000 - 4*AGI - 2*DEX) can hold back the next attack.
+    const tl = c.lv('MO_TRIPLEATTACK');
+    if (tl > 0 && cd.MO_TRIPLEATTACK && SK.MO_TRIPLEATTACK) {
+      const p = MX(0, 30 - tl) / 100, ct = ctxOf('MO_TRIPLEATTACK', MN(tl, cd.MO_TRIPLEATTACK.maxLv)), rt = weaponAttack(ct);
+      rows.push({ label: 'Triple Attack Lv ' + tl + ' (replaces the normal attack)', min: rt.total.min, max: rt.total.max, avg: rt.total.avg, chance: p * rt.hit });
+      keep = 1 - p; tripleAvg = p * rt.avgAtk;
+      const ad = +st.adelay || 0;
+      cycle = (1 - p) * ad + p * MX(ad, delayFix(ct, cdAt(ct, 'delay', 0)));
+      notes.push('Triple Attack: ' + (30 - tl) + '% chance per attack (30 - level), it replaces the normal hit (battle.cpp:7267); the triple hit uses the Raging Trifecta Blow formula, its after-delay is 1000 - 4*AGI - 2*DEX ms.');
+    }
+    // Auto Blitz Beat (skill.cpp:1351-1360, in skill_additional_effect: needs a landed normal attack): falcon + bow + HT_BLITZBEAT learned,
+    // rnd() % 1000 <= LUK*10/3 + 1, level = min(learned, (job level + 9) / 10)
+    if (st.falcon) {
+      const bl = c.lv('HT_BLITZBEAT');
+      if (!st.right || st.right.type !== 'Bow') notes.push('Auto Blitz Beat needs a bow.');
+      else if (bl <= 0) notes.push('Auto Blitz Beat needs Blitz Beat learned.');
+      else {
+        const L = MN(bl, T((+st.jobLv + 9) / 10)), pr = MN(1, (T(num(st.luk) * 10 / 3) + 2) / 1000);
+        const rb = miscAttack(ctxOf('HT_BLITZBEAT', L)), chance = keep * pr * pAny * rb.hit;
+        rows.push({ label: 'Auto Blitz Beat Lv ' + L, min: rb.total.min, max: rb.total.max, avg: rb.total.avg, chance });
+        add += chance * rb.total.avg;
+        notes.push('Auto Blitz Beat: chance (LUK*10/3 + 2)/10 = ' + fmt1(pr * 100) + '% per landed attack, level min(learned ' + bl + ', (job level + 9) / 10 = ' + T((+st.jobLv + 9) / 10) + ').');
+      }
+    }
+    // Hindsight (battle.cpp:7489-7519): every attack (hit or miss) has SC_AUTOSPELL val4 = 5 + 2*lv % to cast the spell on the target; with val3 = cap > 1
+    // the cast level is rolled: 50% cap / 2, 35% cap - 1, 15% cap. SP cost skill_get_sp * 2 / 3.
+    const hs = c.buffs.SA_AUTOSPELL;
+    if (hs && typeof hs === 'object' && +hs.lv > 0 && HINDSIGHT[hs.skill] && cd[hs.skill] && SK[hs.skill]) {
+      const hl = MN(10, +hs.lv | 0), spec = HINDSIGHT[hs.skill], cap = hl >= spec[0] ? spec[1](hl) : 0;
+      if (cap > 0) {
+        const learned = c.lv(hs.skill), L = learned > 0 ? MN(learned, cap) : cap;
+        const dist = L > 1 ? [[L, 0.15], [L - 1, 0.35], [T(L / 2), 0.5]] : [[1, 1]];
+        const byLv = {}; for (const [l, p] of dist) byLv[l] = (byLv[l] || 0) + p;
+        let mn = Infinity, mx = 0, avg = 0;
+        for (const l of Object.keys(byLv)) { const t = magicAttack(ctxOf(hs.skill, +l)).total; mn = MN(mn, t.min); mx = MX(mx, t.max); avg += byLv[l] * t.avg; }
+        const chance = keep * (5 + 2 * hl) / 100, nm = cd[hs.skill].name;
+        rows.push({ label: 'Hindsight: ' + nm + ' Lv ' + L, min: mn, max: mx, avg, chance });
+        add += chance * avg;
+        notes.push('Hindsight Lv ' + hl + ': ' + (5 + 2 * hl) + '% chance per attack, hit or miss (5 + 2*level, battle.cpp:7489).' + (L > 1 ? ' Cast level ' + Object.keys(byLv).sort((a, b) => b - a).map(l => l + ' (' + Math.round(byLv[l] * 100) + '%)').join(', ') + '; the damage shown is the expectation over these (battle.cpp:7496-7501).' : ''));
+        notes.push('Hindsight costs 2/3 of the spell SP per cast; the spell uses the same target, MATK and element rules as a normal cast.');
+        notes.push('Soulbound: Hindsight has no after-cast delay for the caster.');
+        if (!learned) notes.push(nm + ' is not learned: its Hindsight cap (Lv ' + cap + ') is used.');
+      }
+    }
+    return { rows, keep, tripleAvg, add, cycle };
+  };
+
+  // ---------- magic ----------
+  // battle_calc_cardfix BF_MAGIC (pre-re): magic_addrace, magic_addele, magic_addclass
+  // pre-re (battle.cpp:851-853): magic_addrace2 of every group of the target is summed INTO the race step (no separate step, unlike weapon attacks)
+  const mCardfix = (c, ignoreEle, info) => {
+    const b = sbonus(c), tg = c.tg;
+    let f = 1000;
+    const g2 = (tg.race2 || []).map(g => [g, get(b.magicAddRace2, g)]).filter(x => x[1]);
+    if (g2.length && info) info.push({ groups: g2, sum: g2.reduce((s, x) => s + x[1], 0) });
+    f = T(f * (100 + get(b.magicAddRace, tg.race) + get(b.magicAddRace, 'All') + g2.reduce((s, x) => s + x[1], 0)) / 100);
+    if (!ignoreEle) f = T(f * (100 + get(b.magicAddEle, tg.defEle) + get(b.magicAddEle, 'All')) / 100);
+    f = T(f * (100 + get(b.magicAddClass, tg.cls) + get(b.magicAddClass, 'All')) / 100);
+    return f;
+  };
+  // battle_calc_magic_attack
+  const magicAttack = c => {
+    const st = c.st, sk = c.sk, tg = c.tg, bd = [], notes = c.notes, L = (l, r) => bd.push({ label: l, value: fmtR(r) });
+    const mi = num(st.matkMin), ma = num(st.matkMax);
+    const matk = ma > mi ? R(mi, ma - 1) : R(mi, mi);                                              // matk_min + rnd()%(matk_max-matk_min)
+    let d, n = cdAt(c, 'hits', 1), instaKill = null;
+    if (sk.hits) n = sk.hits(c.slv, n, c);
+    const blocked = sk.undeadOnly && !(tg.undead || (sk.undeadOrDemon && tg.race === 'Demon'));
+    if (blocked) notes.push(c.cd.name + ' only damages Undead' + (sk.undeadOrDemon ? ' / Demon' : '') + '-element targets: no damage to this target.');
+    if (sk.base) {
+      const v = sk.base(c.slv, c); d = R(v, v); L('Skill base damage', d);
+      if (sk.turn && !tg.boss) {                                                                   // i = 20*lv + LUK + INT + base lv + 200 - 200*hp/maxhp (full HP target)
+        instaKill = MN(20 * c.slv + num(st.luk) + num(st.int) + st.baseLv, 700) / 1000;
+      } else if (sk.turn) notes.push('Bosses are immune to the Turn Undead instant kill.');
+    } else { d = matk; L('MATK (' + mi + ' - ' + MX(mi, ma - 1) + ')', d); }
+    if (sk.ratio && !sk.grand) {
+      const ratio = sk.ratio(100, c.slv, c);
+      if (ratio !== 100) { d = rMul(d, ratio, 100); L('Skill ratio ' + ratio + '%', d); }
+    }
+    if (sk.constAdd) { const k = sk.constAdd(c.slv, c); d = rK(d, k); L('Constant skill damage +' + k, d); }
+    const sa = get(sbonus(c).skillAtk, c.id); if (sa) { d = rRate(d, sa); L('Skill damage bonus +' + sa + '%', d); }
+    const sb = sbonus(c);
+    const imdef = !!c.flags.IgnoreDefense || matchFlag(sb.ignoreMdefRace, tg.race) || matchFlag(sb.ignoreMdefClass, tg.cls);
+    if (!imdef) { d = rK(rMul(d, 100 - tg.mdefE, 100), -tg.mdef2); L('After MDEF (' + tg.mdefE + '%, MDEF2 ' + tg.mdef2 + ')', d); }   // damage*(100-mdef)/100 - mdef2
+    else L('MDEF ignored', d);
+    if (sk.grand) {
+      // Grand Cross (pre-re): ATK part = base damage after DEF + refine bonus; (ATK + MATK) * (100 + 40*lv)%
+      const w = defReduce(c, 'right', false, baseDamage(c, 'right', false), null, '');
+      const w2 = rLo(rK(w, st.right ? +st.right.refineAtk || 0 : 0), 1);
+      d = rLo(rAdd(rLo(d, 1), w2), 1); L('+ weapon ATK part (after DEF, refine)', d);
+      d = rMul(d, 100 + 40 * c.slv, 100); L('Grand Cross ratio ' + (100 + 40 * c.slv) + '%', d);
+    }
+    d = rLo(d, 1);
+    let ele = cdAt(c, 'element', 'Neutral'); if (ele === 'Weapon' || ele === 'Endowed') ele = (st.right && st.right.element) || 'Neutral';
+    if (!c.flags.IgnoreElement) { d = attrFixC(c, d, ele, tg); L('Element ' + ele + ' vs ' + tg.defEle + ' ' + tg.defElv + ' (' + attrRatio(c.D, ele, tg.defEle, tg.defElv) + '%)' + (fieldPct(c, ele) ? ' +' + fieldPct(c, ele) + '% field enchant' : ''), d); }
+    if (!c.flags.IgnoreAtkCard) {
+      const info = [], f = mCardfix(c, !!c.flags.IgnoreElement, info);
+      if (f !== 1000) { d = applyFix(d, f); L('Magic cards / bonuses x' + (f / 1000).toFixed(3), d); }
+      if (info.length) bd.push({ label: 'Monster race group magic cards (' + info[0].groups.map(x => x[0] + ' ' + sgn(x[1]) + '%').join(', ') + '): summed into the race step, included above', value: sgn(info[0].sum) + '% in the race step' });
+    }
+    if (sk.grand) { d = attrFixC(c, d, ele, tg); L('Grand Cross: element applied a second time', d); }
+    if (d.max < 0) notes.push('The target absorbs this element (damage <= 0).');
+    if (blocked) d = R(0, 0);
+    const dv = divFix(d, n);
+    let total = dv.total, per = dv.per;
+    if (Math.abs(n) > 1) L('Hit count x' + Math.abs(n) + (n < 0 ? ' (damage split)' : ''), total);
+    if (total.max > 0 && total.min < Math.abs(n)) total = R(MX(total.min, Math.abs(n)), total.max, MX(total.avg, Math.abs(n)));   // skill_min_damage (magic)
+    if (tg.lex) { total = rScale(total, 2); per = rScale(per, 2); L('Lex Aeterna x2', total); }
+    total = rPos(total); per = rPos(per);
+    const extra = [];
+    let avgAtk = total.avg;
+    if (instaKill != null && !blocked) {
+      extra.push({ label: 'Turn Undead instant kill', min: tg.hp, max: tg.hp, avg: tg.hp, chance: instaKill });
+      avgAtk = (1 - instaKill) * total.avg + instaKill * tg.hp;
+    }
+    return { kind: 'magic', n: Math.abs(n), per, total, hands: null, extra, crit: null, hit: 1, avgAtk, perCast: total.avg, bd, ele };
+  };
+
+  // ---------- misc ----------
+  // battle_calc_misc_attack: fixed base damage, flee check (unless IgnoreFlee), attr_fix, hit count
+  const miscAttack = c => {
+    const sk = c.sk, tg = c.tg, bd = [], L = (l, r) => bd.push({ label: l, value: fmtR(r) });
+    const v = sk.base(c.slv, c); let d = R(v, v); L('Skill base damage', d);
+    const hit = hitChance(c, 0);
+    const sa = get(sbonus(c).skillAtk, c.id); if (sa) { d = rRate(d, sa); L('Skill damage bonus +' + sa + '%', d); }
+    let e = cdAt(c, 'element', 'Neutral'); if (e === 'Weapon' || e === 'Endowed') e = 'Neutral';
+    if (!c.flags.IgnoreElement) { d = attrFixC(c, d, e, tg); L('Element ' + e + ' vs ' + tg.defEle + ' ' + tg.defElv + ' (' + attrRatio(c.D, e, tg.defEle, tg.defElv) + '%)', d); }
+    const n = cdAt(c, 'hits', 1);
+    const dv = divFix(rLo(d, 0), n);
+    let total = dv.total, per = dv.per;
+    if (Math.abs(n) > 1) L('Hit count x' + Math.abs(n), total);
+    if (total.max > 0 && total.min < Math.abs(n)) total = R(MX(total.min, Math.abs(n)), total.max, MX(total.avg, Math.abs(n)));   // skill_min_damage (misc)
+    if (tg.lex) { total = rScale(total, 2); per = rScale(per, 2); L('Lex Aeterna x2', total); }
+    return { kind: 'misc', n: Math.abs(n), per, total, hands: null, extra: [], crit: null, hit, avgAtk: hit * total.avg, perCast: total.avg, bd, ele: e };
+  };
+
+  // ---------- timing ----------
+  // skill_castfix (pre-re): cast * (150 - DEX) / 150, then castrate (100 = normal) and per-skill bCastrate; no listed skill has CastTimeFlags
+  const castFix = (c, base) => {
+    const scale = 150 - num(c.st.dex);
+    if (scale <= 0) return 0;
+    let time = base * scale / 150;
+    const sc = get(sbonus(c).skillCast, c.id);                                                     // bonus2 bCastrate (optional Bonus field)
+    if (sc) time += time * sc / 100;
+    time = time * (1 - (100 - (c.st.castRate == null ? 100 : +c.st.castRate)) / 100);
+    return MX(T(time), 0);
+  };
+  // skill_delayfix (pre-re): delay_dependon_dex / delay_dependon_agi default 0; Monk combos: 1000 - 4*AGI - 2*DEX when no delay is set
+  const delayFix = (c, base) => {
+    let time = base;
+    if (/^(MO_TRIPLEATTACK|MO_CHAINCOMBO|MO_COMBOFINISH)$/.test(c.id)) { if (time === 0) time = 1000; time -= 4 * num(c.st.agi) + 2 * num(c.st.dex); }
+    const dr = +c.st.delayRate || 100;                                                             // Status.delayRate read as a % multiplier (100 = normal)
+    if (dr !== 100) time = time * dr / 100;
+    return MX(T(time), 0);
+  };
+
+  // ---------- ground / unit skills: how many ticks of one cast can hit the target ----------
+  // skill.cpp:55 SKILLUNITTIMER_INTERVAL = 100: unit timers run every 100 ms and a unit hits a target again once tick >= ts->tick, ts->tick = tick + interval
+  // (skill.cpp:6766-6771), so a unit interval rounds up to a multiple of 100 ms. A unit lives Duration1 ms (skill_unit_timer_sub, skill.cpp:12214: it expires
+  // when tick - group->tick >= limit), so the ticks of one unit are ceil(Duration1 / rounded interval). CALCDATA.skills[id].duration / .unitInterval are
+  // Duration1 and Unit.Interval of skill_db.yml. HSEL[id](c) -> {max, def, label, note}: max = ticks a standing target can take, def = the default pick.
+  const UNIT_TICK = 100;
+  const unitTicks = c => {
+    const dur = cdAt(c, 'duration', 0), iv = (c.cd && c.cd.unitInterval) || 0;
+    return dur > 0 && iv > 0 ? MX(1, Math.ceil(dur / (Math.ceil(iv / UNIT_TICK) * UNIT_TICK))) : 1;
+  };
+  const tickNote = (c, what) => what + ': Duration1 ' + cdAt(c, 'duration', 0) + ' ms, unit interval ' + ((c.cd && c.cd.unitInterval) || 0) + ' ms (ticks every ' + Math.ceil(((c.cd && c.cd.unitInterval) || 0) / UNIT_TICK) * UNIT_TICK + ' ms, skill.cpp:55, 6766) = at most ' + unitTicks(c) + ' ticks per target.';
+  const HSEL = {
+    // The 3rd hit has a 150 % freeze chance (stormgust.cpp:38); every hit knocks back 2 cells (skill_db.yml). Default 3 = hits until it freezes.
+    WZ_STORMGUST: c => ({ max: unitTicks(c), def: 3, label: 'Waves that hit', note: tickNote(c, 'Storm Gust') + ' The 3rd hit has a 150% freeze chance (stormgust.cpp:38): a frozen target is Water 1 (use the Frozen debuff) and takes no more waves if it stays frozen; the default is 3.' }),
+    // skill.cpp:5794 val2 = 4 + level hits per wall cell (shared by everything standing in it); each hit knocks back 2 cells unless the target is Fire / Undead element (firewall.cpp:22-26)
+    MG_FIREWALL: c => { const mx = 4 + c.slv, noKb = c.tg.defEle === 'Fire' || c.tg.undead; return { max: mx, def: noKb ? mx : 1, label: 'Hits in the wall', note: 'Fire Wall: every cell hits up to 4 + level = ' + mx + ' times (skill.cpp:5794). ' + (noKb ? 'A Fire / Undead element target is not knocked back (firewall.cpp:22-26), so it keeps taking hits: default ' + mx + '.' : 'Each hit knocks the target back 2 cells (skill_db.yml), so it normally takes about 1 hit per cell it crosses: default 1.') }; },
+    // meteorstorm.cpp:17-20: Duration1 / interval meteors on random cells of the (2 * 3 + 1)^2 area; each meteor hits everything within its unit range 3 once (HitCount hits)
+    WZ_METEOR: c => { const iv = (c.cd && c.cd.unitInterval) || 1000, mx = MX(1, T(cdAt(c, 'duration', 0) / iv)); return { max: mx, def: MX(1, Math.round(mx * 37 * 37 / (49 * 49))), label: 'Meteors that land', note: 'Meteor Storm: ' + mx + ' meteors (Duration1 ' + cdAt(c, 'duration', 0) + ' ms / ' + iv + ' ms, meteorstorm.cpp:17), each hits ' + cdAt(c, 'hits', 1) + ' time(s). A target in the centre cell is reached by all of them; one standing at a random spot of the 7x7 area by about 57% (37/49 per axis): the default.' }; },
+    WZ_VERMILION: c => ({ max: unitTicks(c), def: 3, label: 'Waves that hit', note: tickNote(c, 'Lord of Vermilion') + ' Each wave is one full damage split over ' + Math.abs(cdAt(c, 'hits', 1)) + ' hits.' }),
+    PR_MAGNUS: c => ({ max: unitTicks(c), def: 3, label: 'Ticks that hit', note: tickNote(c, 'Magnus Exorcismus') + ' Each tick hits ' + cdAt(c, 'hits', 1) + ' time(s) (HitCount = level).' }),
+    // skill.cpp:5819 the group counts val1 = level + 3 damaging hits shared by every target (skill.cpp:6923 sg->val1 -= 1; the group ends at 0, skill.cpp:12414)
+    PR_SANCTUARY: c => { const t = unitTicks(c), mx = MN(c.slv + 3, t); return { max: mx, def: 3, label: 'Ticks that hit', note: tickNote(c, 'Sanctuary') + ' The cast can only deal level + 3 = ' + (c.slv + 3) + ' damaging ticks in total over all targets (skill.cpp:5819).' }; },
+    // skill.cpp:6886-6889: with gx_allhit 0 (the compiled default, skill.conf is not in the reference copy) every cross cell hits once and then disappears
+    CR_GRANDCROSS: c => ({ max: unitTicks(c), def: 1, label: 'Ticks that hit', note: tickNote(c, 'Grand Cross') + ' With gx_allhit 0 (default) each cross cell hits once (skill.cpp:6888), hence the default 1; raise it if the server enables gx_allhit.' }),
+    BA_DISSONANCE: c => ({ max: unitTicks(c), def: 3, label: 'Ticks that hit', note: tickNote(c, 'Dissonance') }),
+    AM_DEMONSTRATION: c => ({ max: unitTicks(c), def: 3, label: 'Ticks that hit', note: tickNote(c, 'Bomb') })
+  };
+
+  // ---------- damage taken from a monster ----------
+  // battle_calc_weapon_attack with a monster source and a player target, normal attack (skill id 0), pre-renewal. Values from the shipped
+  // conf/battle/battle.conf (not the compiled-in defaults where they differ): min_hitrate 5 / max_hitrate 100, agi_penalty_* and vit_penalty_*
+  // (type 1, players, count 3, num 10 / 5), attack_attr_none 14 (monster normal attacks are non-elemental), enable_baseatk 0x9 (no monster
+  // base ATK), enable_critical 17 (no monster crits), enable_perfect_flee 1 (players).
+  const INC = { minHit: 5, maxHit: 100, agiCount: 3, agiNum: 10, vitCount: 3, vitNum: 5 };
+  // is_attack_hitting 3265-3275: attacker_count >= agi_penalty_count -> flee = flee * (100 - (count - (agi_penalty_count - 1)) * agi_penalty_num) / 100, min 1
+  const penFlee = (flee, n) => (n >= INC.agiCount ? MX(1, T(flee * (100 - (n - (INC.agiCount - 1)) * INC.agiNum) / 100)) : flee);
+  const mobThresholds = mob => {
+    const s = (mob && mob.stats) || {}, lv = +(mob && mob.lv) || 0;
+    // monster HIT = level + DEX, FLEE = level + AGI (status_calc_misc 2705-2711); hitrate = 80 + HIT - FLEE (is_attack_hitting 3262, 3278), clamped 5..100
+    return lv ? { hit100: lv + (+s.AGI || 0) + (INC.maxHit - 80), flee95: lv + (+s.DEX || 0) + (80 - INC.minHit) } : { hit100: 0, flee95: 0 };
+  };
+  // The character's DEF side against a monster hit (battle_calc_defense_reduction 4730-4883, player target, pre-re). vit_penalty (4780-4798): target_count =
+  // min(count, 100 / num + count_min - 1); Steel Body keeps its hard DEF. -> {def1 (capped at 100, 4872), vit: {min,max,avg}, vn}
+  const incDef = (st, mob, n, B) => {
+    const bf = st.buffs || {}, sk = st.skills || {}, race = mob.race || 'Formless';
+    let def1 = num(st.def), def2 = num(st.def2);
+    const vn = MN(n, T(100 / INC.vitNum) + INC.vitCount - 1);
+    if (vn >= INC.vitCount) {
+      const f = 100 - (vn - (INC.vitCount - 1)) * INC.vitNum;
+      if (!bf.MO_STEELBODY) def1 = T(def1 * f / 100);
+      def2 = T(def2 * f / 100);
+      B('VIT penalty (' + n + ' attackers)', 'DEF x' + f + '%');
+    }
+    def2 = MX(def2, 1);                                                                            // 4796
+    // player target pre-re (4808-4812): vit_def = 3*def2/10 + rnd_value(0, max(0, def2^2/150 - 3*def2/10 - 1)) + def2/2
+    const v3 = T(3 * def2 / 10), vb = v3 + T(def2 / 2);
+    let vit = R(vb, vb + MX(0, T(def2 * def2 / 150) - v3 - 1));
+    const dp = get(sk, 'AL_DP');                                                                   // 4816-4818: undead (element) / demon monsters, Divine Protection
+    if (dp > 0 && (mob.element === 'Undead' || race === 'Demon')) { const k = T((st.baseLv / 25 + 3) * dp + 0.5); vit = rK(vit, k); B('Divine Protection (vs Undead / Demon)', '+' + k + ' VIT DEF'); }
+    return { def1: MN(def1, 100), vit, vn };
+  };
+  // battle_calc_cardfix, target side (the character), every step on a base of 1000 in source order. cat 'weapon' (BF_WEAPON 1089-1153) and 'magic' (BF_MAGIC 894-935):
+  // element, size, race group, race, class, range; 'misc' (BF_MISC 1215-1255): element, race, size, race group, class, range. nk = the skill's CALCDATA flags
+  // (IgnoreElement skips the element step, IgnoreDefCard the whole function 1100 / 1218, IgnoreLongCard the long-range step). Returns the 1000-based factor.
+  const incResist = (st, mob, D, ele, cat, ranged, nk, B) => {
+    if (nk.IgnoreDefCard) return 1000;
+    const bon = st.bonus || {}, race = mob.race || 'Formless', size = mob.size || 'Medium', cls = mob.cls && mob.cls !== 'Normal' ? 'Boss' : 'Normal';
+    let f = 1000;
+    const step = (label, p) => { if (p) { f = T(f * (100 - p) / 100); B(label + ' ' + (p > 0 ? '-' : '+') + Math.abs(p) + '%', 'x' + (f / 1000).toFixed(3)); } };
+    const sEle = () => { if (!nk.IgnoreElement) step('Resist ' + ele, get(bon.subEle, ele) + get(bon.subEle, 'All')); };
+    const sSize = () => step('Resist ' + size + ' monsters', get(bon.subSize, size) + get(bon.subSize, 'All'));
+    // subrace2 (bSubRace2): groups of the attacking monster summed into one step (battle.cpp:1126-1128)
+    const sGrp = () => {
+      const g = (Array.isArray(mob.race2) ? mob.race2 : race2Of(mob.key, D)).map(x => [x, get(bon.subRace2, x)]).filter(x => x[1]);
+      if (g.length) step('Resist ' + g.map(x => x[0]).join(' / ') + ' race group', g.reduce((s, x) => s + x[1], 0));
+    };
+    const sRace = () => step('Resist ' + race, get(bon.subRace, race) + get(bon.subRace, 'All'));
+    const sCls = () => step('Resist ' + cls + ' class', get(bon.subClass, cls) + get(bon.subClass, 'All'));
+    (cat === 'misc' ? [sEle, sRace, sSize, sGrp, sCls] : [sEle, sSize, sGrp, sRace, sCls]).forEach(fn => fn());
+    if (ranged && !nk.IgnoreLongCard) step('Resist ranged attacks', +bon.subLong || 0);            // 1147-1150: BF_LONG -> long_attack_def_rate
+    return f;
+  };
+
+  // ---------- monster skills (src = monster, target = the character) ----------
+  // MS[id] = { t: 'w' weapon | 'm' magic | 'x' misc, ratio(r, lv, c), hit(h, lv, c) (modifyHitRate, before the 5..100 clamp), hits(lv, base, c), crit (always critical),
+  //   short (battle_range_type forces short), randEle, forceNeutral, envenom, acid, base (fixed base damage), hpPct, grand, proc, constAdd, note, unsupported: 'why' }.
+  // Ratios and hit rates come from src/map/skills/<lineage>/<skill>.cpp calculateSkillRatio / modifyHitRate (pre-re branches); every skill file cited below is under that folder.
+  // Skills shared with the player table SK reuse its ratio / hit rate / hit count (same files); c = {set: {}, lv: () => 0, slv, mob, st: monster stats, tg: the character as a target}.
+  const MS = {};
+  const msk = (id, o) => { MS[id] = o; };
+  const viaSK = (id, o) => msk(id, Object.assign({ t: SK[id].t, ratio: SK[id].ratio, hit: SK[id].hit, hits: SK[id].hits }, o));
+  const hit20 = h => h + T(h * 20 / 100);                  // modifyHitRate: hit_rate += hit_rate * 20 / 100
+  const npcLv = (r, l) => r + 100 * (l - 1);                // calculateSkillRatio: base_skillratio += 100 * (skill_lv - 1)
+  // npc/<element>attributeattack.cpp:9-15: +100% per level above 1, hit rate +20%; the element is the skill's own (skill_db.yml), attr_fix applies to skills (battle.cpp:3669 only skips skill_id 0)
+  for (const id of ['NPC_FIREATTACK', 'NPC_WATERATTACK', 'NPC_WINDATTACK', 'NPC_GROUNDATTACK', 'NPC_HOLYATTACK', 'NPC_DARKNESSATTACK', 'NPC_TELEKINESISATTACK', 'NPC_UNDEADATTACK', 'NPC_POISONATTACK']) msk(id, { t: 'w', ratio: npcLv, hit: hit20 });
+  msk('NPC_RANDOMATTACK', { t: 'w', ratio: npcLv, randEle: true });                      // npc/randomattack.cpp:9; element Random = rnd() % ELE_ALL (battle.cpp:3493)
+  // status-ailment attacks: plain ATK, +20% hit rate (npc/blindattack.cpp:15, poisonattack.cpp:15, spiritdestruction.cpp:40 ...)
+  for (const id of ['NPC_POISON', 'NPC_BLINDATTACK', 'NPC_CURSEATTACK', 'NPC_PETRIFYATTACK', 'NPC_SILENCEATTACK', 'NPC_SLEEPATTACK', 'NPC_STUNATTACK', 'NPC_BLEEDING', 'NPC_MENTALBREAKER']) msk(id, { t: 'w', hit: hit20 });
+  // plain WeaponSkillImpl: ratio 100, no hit modifier (skill_factory_npc.cpp:223, 295, 389; npc/criticalwounds.cpp, breakarmor.cpp, breakhelm.cpp, breakshield.cpp, splashattack.cpp)
+  for (const id of ['NPC_CRITICALWOUND', 'NPC_ARMORBRAKE', 'NPC_HELMBRAKE', 'NPC_SHIELDBRAKE', 'NPC_RANGEATTACK', 'NPC_GUIDEDATTACK', 'NPC_SPLASHATTACK']) msk(id, { t: 'w' });
+  msk('NPC_CRITICALSLASH', { t: 'w', crit: true });                                       // always critical (battle.cpp:3022): ATK2 roll, ignores DEF (crit, 3335) and Flee (3239)
+  msk('NPC_PIERCINGATT', { t: 'w', ratio: r => r - 25 });                                // npc/piercingattack.cpp:9 (75%); DamageFlags IgnoreDefense
+  msk('NPC_COMBOATTACK', { t: 'w', ratio: (r, l) => r + 25 * l });                      // npc/multistageattack.cpp:9; HitCount -(level + 1) = split over that many hits
+  msk('NPC_DARKCROSS', { t: 'w', ratio: (r, l) => r + 35 * l });                        // npc/crossofdarkness.cpp:15
+  for (const id of ['NPC_HELLJUDGEMENT', 'NPC_PULSESTRIKE', 'NPC_BLOODDRAIN']) msk(id, { t: 'w', ratio: npcLv });   // npc/hellsjudgement.cpp:15, pulsestrike.cpp:9, suckingblood.cpp:12
+  msk('NPC_VAMPIRE_GIFT', { t: 'w', ratio: (r, l) => r + ((l - 1) % 5 + 1) * 100 });    // npc/vampiregift.cpp:12
+  for (const id of ['NPC_ACIDBREATH', 'NPC_FIREBREATH', 'NPC_DARKNESSBREATH']) msk(id, { t: 'w', ratio: npcLv, hit: h => h * 2 });   // npc/acidbreath.cpp:17,39 firebreath.cpp:12,34 darknessbreath.cpp:12,34 (hit_rate *= 2)
+  // skills borrowed from the player classes (same ratios as SK; the files are the same for monsters)
+  for (const id of ['SM_BASH', 'SM_MAGNUM', 'MC_MAMMONITE', 'CR_SHIELDCHARGE', 'CR_HOLYCROSS', 'KN_PIERCE', 'KN_SPEARSTAB', 'KN_SPEARBOOMERANG', 'KN_BRANDISHSPEAR', 'AS_SONICBLOW', 'AS_GRIMTOOTH',
+    'TF_SPRINKLESAND', 'RG_INTIMIDATE', 'AC_DOUBLE', 'AC_CHARGEARROW', 'AM_ACIDTERROR']) viaSK(id, {});
+  // Magnum Break: a monster passes no distance flag (magnum.cpp:36 sd ? distance_bl : 0), so miscflag == 1 = the inner ring: 100% + 20% per level (SK uses settings.magnumOuter, off here)
+  // Pierce: size + 1 hits against a Medium character = 2 (pierce.cpp:11). Brandish Spear: every zone is miscflag 0 for a monster (brandishspear.cpp:59, flag | 0): first-zone ratio
+  // Acid Terror: ignores DEF (flag), base ATK - your DEF2 (battle.cpp:4244 ATK_ADD(-tstatus->def2)), no hit modifiers
+  MS.AM_ACIDTERROR.acid = true;
+  viaSK('AM_DEMONSTRATION', { short: true });                                             // battle.cpp:2678: a monster's Bomb / Arrow Shower is always short range
+  viaSK('AC_SHOWER', { short: true });
+  msk('KN_AUTOCOUNTER', { t: 'w', hit: hit20 });                                          // swordman/counterattack.cpp:20; a monster has no crit (status.cpp:2723), so no forced critical (battle.cpp:3069)
+  msk('LK_SPIRALPIERCE', { t: 'w', forceNeutral: true });                                 // spiralpierce.cpp:15,41: pre-re ratio 100, element forced Neutral for monsters; IgnoreDefense, 5 hits
+  msk('TF_POISON', { t: 'w', envenom: true });                                            // envenom: ratio 100, +15 * level after the element, attr_fix again (battle.cpp:3722-3727)
+  msk('SN_SHARPSHOOTING', { t: 'w', ratio: (r, l) => r - 100 + 140 * l });                // focusedarrowstrike.cpp:13: a monster's path hit (flag & 2) = 140% per level; no crit for monsters
+  msk('ASC_METEORASSAULT', { t: 'w', ratio: (r, l) => r - 60 + 40 * l });                 // thief/meteorassault.cpp:11 (pre-re)
+  msk('HT_FREEZINGTRAP', { t: 'w', short: true });                                        // traps are always short range (battle.cpp:2673), ratio 100
+  // magic: MATK = INT + (INT / 7)^2 .. INT + (INT / 5)^2 (status.cpp:2511-2516, pre-re, monsters too), ratios as SK
+  for (const id of ['MG_NAPALMBEAT', 'MG_SOULSTRIKE', 'MG_COLDBOLT', 'MG_FIREBOLT', 'MG_LIGHTNINGBOLT', 'MG_FROSTDIVER', 'MG_FIREBALL', 'MG_THUNDERSTORM', 'MG_FIREWALL', 'WZ_JUPITEL', 'WZ_WATERBALL',
+    'WZ_EARTHSPIKE', 'WZ_FROSTNOVA', 'WZ_HEAVENDRIVE', 'WZ_METEOR', 'WZ_VERMILION', 'WZ_STORMGUST', 'WZ_SIGHTRASHER']) viaSK(id, {});
+  // Fire Pillar: for a monster the hits are not divided (firepillar.cpp:27 only for players): MATK * (-60 + 20 * lv)% + 100 + 50 * lv, once per hit, ignores MDEF (flag)
+  viaSK('WZ_FIREPILLAR', { hits: (l, b) => b, constAdd: l => 100 + 50 * l });
+  msk('HW_NAPALMVULCAN', { t: 'm', ratio: r => r + 25 });                                 // mage/napalmvulcan.cpp:13 (pre-re)
+  for (const id of ['NPC_DARKSTRIKE', 'NPC_DARKTHUNDER', 'NPC_MAGICALATTACK']) msk(id, { t: 'm' });   // plain MATK (npc/soulstrikeofdarkness.cpp, darknessjupitel.cpp, demonshockattack.cpp); hits = HitCount
+  msk('NPC_ENERGYDRAIN', { t: 'm', ratio: (r, l) => r + 100 * l });                       // npc/energydrain.cpp:12
+  // Dark Breath: 50% proc (darkbreath.cpp:9-10), damage = your current HP * (10 / 12 / 16 / 25 / 50 % at Lv 1..5, 50% above) then MDEF (battle.cpp:5927-5929)
+  msk('NPC_DARKBREATH', { t: 'm', hpPct: true, proc: 0.5 });
+  msk('CR_GRANDCROSS', { t: 'm', grand: true });                                          // battle.cpp:6172-6204 / 6244-6257; a monster rolls its ATK for the weapon part
+  msk('NPC_GRANDDARKNESS', { t: 'm', grand: true });
+  // misc
+  msk('TF_THROWSTONE', { t: 'x', base: () => 30 });                                       // battle.cpp:6335: 30 for monsters (50 for players); IgnoreFlee
+  msk('HT_CLAYMORETRAP', { t: 'x', short: true, base: (l, c) => T(l * (c.st.dex / 2 + 75) * (100 + c.st.int) / 100) });   // battle.cpp:6355 with the monster's DEX / INT
+  msk('NPC_SELFDESTRUCTION', { t: 'x', base: (l, c, o) => (o.mobHp != null ? +o.mobHp : +c.mob.hp || 0), note: 'Self Destruction deals the monster\'s remaining HP (battle.cpp:6384): shown for a full HP monster (opts.mobHp); it kills the monster.' });
+  msk('ASC_BREAKER', { t: 'w', unsupported: 'Soul Destroyer adds an INT based misc part to a weapon part (battle.cpp:5372, 6448): not calculated.' });
+  msk('NPC_EARTHQUAKE', { t: 'm', unsupported: 'Earthquake is a multi-unit splash with its own ATK formula (battle.cpp:5936-5963): not calculated.' });
+  msk('NPC_EVILLAND', { t: 'x', unsupported: 'Evil Land heals Undead / Demon monsters and hurts others through its ground unit (skill.cpp:6958): not calculated.' });
+  const KIND = { w: 'weapon', m: 'magic', x: 'misc' };
+  const ELES_ALL = ['Neutral', 'Water', 'Earth', 'Fire', 'Wind', 'Poison', 'Holy', 'Dark', 'Ghost', 'Undead'];
+
+  // A monster's skill list: the Episode 8 list (D.mobSkills[mob.skills[i]]) when it has one, else the rAthena Ep 13.2 list (mob.raSkills rows
+  // [state, id, lv, rate, cast, delay, cancelable, target, cond, ...]). rate = % chance per check.
+  const mobSkillRows = (mob, D) => {
+    const ep8 = D && Array.isArray(D.mobSkills) && Array.isArray(mob.skills) ? mob.skills.map(i => D.mobSkills[i]).filter(Boolean) : [];
+    if (ep8.length) return ep8.map(s => ({ id: s.skill, lv: +s.lv || 1, rate: +s.rate || 0, state: String(s.state || '').toLowerCase(), cast: +s.cast || 0, delay: +s.delay || 0, cond: s.cond || '', condval: s.condval || '', src: 'ep8' }));
+    return (mob.raSkills || []).map(r => ({ id: r[1], lv: +r[2] || 1, rate: +r[3] || 0, state: String(r[0] || '').toLowerCase(), cast: +r[4] || 0, delay: +r[5] || 0, cond: r[8] && r[7] && r[7] !== 'always' ? r[7] : '', condval: r[8] && r[7] && r[7] !== 'always' ? r[8] : '', src: 'ra' }));
+  };
+  // The skills of a monster that deal damage to a character: [{id, lv, name, kind, rate, state, cast, delay, cond, condval, supported, note}] (emotes, summons, buffs, heals,
+  // status-only skills and teleports are left out). supported false = damaging but not calculated (incoming() returns null, note says why).
+  // mobSkillList(mob, D): the WHOLE skill list of a monster (same rows plus damaging: bool), the same entry listed for several states is one row with the states joined
+  const mobSkillList = (mob, D) => {
+    const cds = D && D.CALCDATA && D.CALCDATA.skills || {}, res = [], seen = new Map();
+    for (const r of mobSkillRows(mob || {}, D)) {
+      const def = MS[r.id], key = [r.id, r.lv, r.rate, r.cast, r.delay, r.cond, r.condval].join('|'), prev = seen.get(key);
+      if (prev) { if (r.state && prev.state.split(' / ').indexOf(r.state) < 0) prev.state += ' / ' + r.state; continue; }
+      const row = { id: r.id, lv: r.lv, name: cds[r.id] ? cds[r.id].name : r.id, damaging: !!def, kind: def ? KIND[def.t] : null, rate: r.rate, state: r.state, cast: r.cast, delay: r.delay, cond: r.cond, condval: r.condval,
+        supported: !!def && !def.unsupported, note: def && def.unsupported || undefined };
+      seen.set(key, row); res.push(row);
+    }
+    return res;
+  };
+  const mobAttackSkills = (mob, D) => mobSkillList(mob, D).filter(r => r.damaging).map(r => { const o = Object.assign({}, r); delete o.damaging; return o; });
+  const mixR = rs => R(MN.apply(null, rs.map(r => r.min)), MX.apply(null, rs.map(r => r.max)), rs.reduce((s, r) => s + r.avg, 0) / rs.length);   // uniform mixture
+
+  // One use of a monster skill against the character: opts.skill = {id, lv}. Weapon skills: ATK roll x ratio, DEF, element (attr_fix), resists, hit count; magic: MATK x ratio, MDEF / MDEF2,
+  // element, resists; misc: fixed base. Skills never trigger Lucky Dodge (battle.cpp:5424 needs skill_id 0), magic always hits, weapon / misc skills use the hit rate unless IgnoreFlee.
+  const incomingSkill = (st, mob, D, o) => {
+    const id = o.skill.id, def = MS[id], cd = D.CALCDATA.skills[id];
+    if (!def || def.unsupported || !cd) return null;
+    const lv = MX(1, T(+o.skill.lv) || 1), dlv = MN(lv, cd.maxLv || 99), bd = [], notes = [], B = (l, v) => bd.push({ label: l, value: v });
+    const n = MX(1, T(+o.attackers || 1)), flags = cd.flags || {}, at = (key, dflt) => (cd[key] && cd[key][dlv - 1] != null ? cd[key][dlv - 1] : dflt);
+    const defEle = st.armorEle || 'Neutral', defElv = 1, mlv = +mob.lv || 1, mst = mob.stats || {}, sv = k => +mst[k] || 0;
+    const ranged = def.short ? false : o.ranged != null ? !!o.ranged : (+mob.range || 1) >= 4;     // skillrange_by_distance (~BL_PC): by distance, <= 3 cells short (battle.cpp:2735)
+    const mc = { set: {}, lv: () => 0, slv: lv, mob, st: { str: sv('STR'), agi: sv('AGI'), vit: sv('VIT'), int: sv('INT'), dex: sv('DEX'), luk: sv('LUK') },
+      tg: { sizeIdx: 1, size: 'Medium', undead: defEle === 'Undead', race: 'Demi-Human', cls: 'Normal' } };   // the character: Medium, Demi-Human, Undead only through the armor element
+    let e = at('element', 'Neutral'); if (e === 'Weapon' || e === 'Endowed' || def.forceNeutral) e = 'Neutral';   // a monster's weapon element is Neutral (rhw.ele is never set)
+    const rand = e === 'Random', eles = rand ? ELES_ALL : [e];
+    const always = def.t === 'm' || !!flags.IgnoreFlee || !!def.crit;
+    const mobHit = mlv + sv('DEX'), flee = penFlee(num(st.flee), n);
+    const rateAt = fl => { let h = 80 + mobHit - fl; if (def.hit) h = def.hit(h, lv, mc); return MN(INC.maxHit, MX(INC.minHit, h)) / 100; };
+    const hitChance = always ? 1 : rateAt(flee);
+    const none = () => {}, att = ele => MX(0, attrRatio(D, ele, defEle, defElv));                   // attribute_recover: no (battle.conf:75, battle.cpp:705): a negative ratio is 0
+    const mixed = (fn, what) => {                                                                  // Random element: every element equally likely (rnd() % ELE_ALL)
+      if (!rand) { const r = fn(e, B); return { x: r.x, mod: r.mod }; }
+      const rs = eles.map(x => fn(x, none)), x = mixR(rs.map(r => r.x)), mod = rs.reduce((s, r) => s + r.mod, 0) / rs.length;
+      B('Random element (equally likely: ' + eles.join(', ') + ') vs ' + defEle + ' 1', 'average x' + fmt1(mod / 100) + (what ? ', ' + what : '') + ': ' + fmtR(x));
+      return { x, mod };
+    };
+    let x, mod = 100, nHit = def.hits ? def.hits(lv, at('hits', 1), mc) : at('hits', 1), kind = KIND[def.t];
+    if (def.t === 'w') {
+      const a = Array.isArray(mob.atk) ? mob.atk : [mob.atk, mob.atk];
+      const amax = +a[1] || +a[0] || 0, amin = MN(+a[0] || 0, amax);
+      let d = def.crit ? R(amax, amax) : amax > amin ? R(amin, amax - 1) : R(amin, amin);          // battle_calc_base_damage 2570-2576: (rnd()%(max-min)) + min, crit = max
+      B((def.crit ? 'Critical ' : '') + 'Monster ATK ' + amin + ' - ' + amax, fmtR(d));
+      if (def.acid) { d = rK(d, -num(st.def2)); B('Base ATK minus your VIT DEF (' + num(st.def2) + ')', fmtR(d)); }
+      const ratio = def.ratio ? def.ratio(100, lv, mc) : 100;
+      if (ratio !== 100) { d = rMul(d, ratio, 100); B('Skill ratio ' + ratio + '%', fmtR(d)); }
+      if (def.crit || flags.IgnoreDefense) { d = rLo(d, 1); B('DEF ignored' + (def.crit ? ' (critical)' : ''), fmtR(d)); }
+      else { const pd = incDef(st, mob, n, B); d = rLo(rSub(rMul(d, 100 - pd.def1, 100), pd.vit), 1); B('After DEF (' + pd.def1 + '%, VIT DEF ' + pd.vit.min + '-' + pd.vit.max + ')', fmtR(d)); }
+      const df = st.buffInfo && st.buffInfo.defender;
+      ({ x, mod } = mixed((ele, L) => {
+        let y = d, m = 100;
+        if (!flags.IgnoreElement) { m = att(ele); y = rPos(rMul(y, m, 100)); L('Element ' + ele + ' vs ' + defEle + ' 1 (' + m + '%)', fmtR(y)); }
+        if (def.envenom) { y = rK(y, 15 * lv); y = rPos(rMul(y, att(ele), 100)); L('Envenom +' + 15 * lv + ', element applied again', fmtR(y)); }
+        const f = incResist(st, mob, D, ele, 'weapon', ranged, flags, L === B ? B : none);
+        if (f !== 1000) y = rPos(applyFix(y, f));
+        if (df && ranged) { const p = +df.longReduction || 0, g = q => q - T(q * p / 100); y = R(g(y.min), g(y.max), y.avg - y.avg * p / 100); L('Defending Aura (ranged) -' + p + '%', fmtR(y)); }   // battle_calc_damage 1832-1839
+        return { x: rPos(y), mod: m };
+      }));
+    } else if (def.t === 'm') {
+      const it = sv('INT'), mi = it + T(it / 7) * T(it / 7), ma = it + T(it / 5) * T(it / 5);      // status.cpp:2511-2516
+      let d;
+      if (def.hpPct) {
+        const hp = o.hp != null ? +o.hp : num(st.maxhp), pct = lv <= 5 ? T(100 / (2 * (6 - lv))) : 50;   // battle.cpp:5928
+        d = R(T(hp * pct / 100), T(hp * pct / 100)); B('Your HP ' + hp + ' x ' + pct + '%', fmtR(d));
+      } else { d = ma > mi ? R(mi, ma - 1) : R(mi, mi); B('Monster MATK (' + mi + ' - ' + MX(mi, ma - 1) + ')', fmtR(d)); }   // matk_min + rnd()%(matk_max - matk_min) (5969-5973)
+      const ratio = def.ratio ? def.ratio(100, lv, mc) : 100;
+      if (ratio !== 100) { d = rMul(d, ratio, 100); B('Skill ratio ' + ratio + '%', fmtR(d)); }
+      if (def.constAdd) { const k = def.constAdd(lv, mc); d = rK(d, k); B('Constant skill damage +' + k, fmtR(d)); }   // battle.cpp:5999-6000
+      const mdef = num(st.mdef), mdef2 = num(st.mdef2);
+      if (flags.IgnoreDefense) B('MDEF ignored', fmtR(d));
+      else { d = rK(rMul(d, 100 - mdef, 100), -mdef2); B('After MDEF (' + mdef + '%, MDEF2 ' + mdef2 + ')', fmtR(d)); }   // damage * (100 - mdef) / 100 - mdef2 (6114)
+      if (def.grand) {                                                                             // Grand Cross / Grand Cross of Darkness: (ATK part after DEF + MATK part) * (100 + 40 * lv)% (6172-6204)
+        const a = Array.isArray(mob.atk) ? mob.atk : [mob.atk, mob.atk];
+        const amax = +a[1] || +a[0] || 0, amin = MN(+a[0] || 0, amax), w0 = amax > amin ? R(amin, amax - 1) : R(amin, amin);
+        const pd = incDef(st, mob, n, B), w = rSub(rMul(w0, 100 - pd.def1, 100), pd.vit);
+        d = rLo(rAdd(w, d), 1); B('+ weapon ATK part (' + amin + ' - ' + amax + ' after DEF)', fmtR(d));
+        d = rMul(d, 100 + 40 * lv, 100); B('Grand Cross ratio ' + (100 + 40 * lv) + '%', fmtR(d));
+      }
+      d = rLo(d, 1);
+      ({ x, mod } = mixed((ele, L) => {
+        let y = d, m = 100;
+        if (!flags.IgnoreElement) { m = att(ele); y = rPos(rMul(y, m, 100)); L('Element ' + ele + ' vs ' + defEle + ' 1 (' + m + '%)', fmtR(y)); }
+        const f = incResist(st, mob, D, ele, 'magic', ranged, flags, L === B ? B : none);
+        if (f !== 1000) y = rPos(applyFix(y, f));
+        if (def.grand) { y = rPos(rMul(y, att(ele), 100)); L('Element applied a second time', fmtR(y)); }   // 6256 (unconditional)
+        return { x: y, mod: m };
+      }));
+    } else {
+      const v = def.base(lv, mc, o); let d = R(v, v); B('Skill base damage', fmtR(d));
+      ({ x, mod } = mixed((ele, L) => {
+        let y = d, m = 100;
+        const f = incResist(st, mob, D, ele, 'misc', ranged, flags, L === B ? B : none);           // BF_MISC: resists first (6587), then attr_fix (6593)
+        if (f !== 1000) y = rPos(applyFix(y, f));
+        if (!flags.IgnoreElement) { m = att(ele); y = rPos(rMul(y, m, 100)); L('Element ' + ele + ' vs ' + defEle + ' 1 (' + m + '%)', fmtR(y)); }
+        return { x: y, mod: m };
+      }));
+    }
+    const dv = divFix(rLo(x, 0), nHit);
+    let total = dv.total, per = dv.per;
+    if (dv.n > 1) B('Hit count x' + dv.n + (nHit < 0 ? ' (damage split)' : ''), fmtR(total));
+    if (def.t !== 'w' && total.max > 0 && total.min < dv.n) total = R(MX(total.min, dv.n), total.max, MX(total.avg, dv.n));   // skill_min_damage 2|4 (magic, misc), battle.cpp:8370
+    total = rPos(total); per = rPos(per);
+    // --- landing chance
+    if (always) B(def.t === 'm' ? 'Hit chance' : def.crit ? 'Hit chance (critical hits always land)' : 'Hit chance (this skill ignores Flee)', '100%');
+    else {
+      const raw = 80 + mobHit - flee;
+      B('Monster HIT ' + mobHit + ' vs your Flee ' + flee + (flee !== num(st.flee) ? ' (' + num(st.flee) + ' with ' + n + ' attackers)' : ''), '80 + ' + mobHit + ' - ' + flee + ' = ' + raw + (def.hit ? ', skill hit modifier -> ' + (def.hit(raw, lv, mc)) : '') + ' -> ' + Math.round(hitChance * 1000) / 10 + '%');
+    }
+    let need95 = null;
+    if (!always) for (let F = 1; F <= 5000; F++) if (rateAt(penFlee(F, n)) <= INC.minHit / 100) { need95 = F; break; }
+    const procChance = def.proc || 1;
+    const name = cd.name || id;
+    notes.push(name + ' Lv ' + lv + ': ' + (def.t === 'w' ? 'physical (weapon) skill' : def.t === 'm' ? 'magic skill' : 'misc skill') + ' of a monster (' + (flags.TargetType || '') + ').');
+    if (def.note) notes.push(def.note);
+    if (def.t === 'm') notes.push('Magic always hits and is reduced by your MDEF and MDEF2; Perfect Dodge only works against normal attacks (battle.cpp:5424).');
+    else if (!always || def.crit) notes.push('Perfect Dodge does not apply to skills (battle.cpp:5424); the hit rate is 80 + monster HIT - your Flee' + (def.hit ? ' with the skill modifier' : '') + ', clamped 5 - 100%.');
+    if (procChance < 1) notes.push('Only ' + procChance * 100 + '% of the casts do damage (darkbreath.cpp:9).');
+    if (flags.IgnoreDefense && def.t === 'w') notes.push('This skill ignores your DEF and VIT DEF.');
+    notes.push('Range: ' + (ranged ? 'long' : 'short') + (def.short ? ' (always short range for this skill)' : ' (by monster range ' + (+mob.range || 1) + '; skills use the real distance, within 3 cells = short; opts.ranged overrides)') + '.');
+    if (nHit !== 1 && Math.abs(nHit) > 1) notes.push('Hits per use: ' + Math.abs(nHit) + (nHit < 0 ? ', the damage is split over them' : ', every hit deals the full damage') + '. Ground and chained skills may hit again on the next tick.');
+    if (n >= INC.agiCount) notes.push(n + ' attackers: Flee -' + (n - (INC.agiCount - 1)) * INC.agiNum + '% (agi_penalty).');
+    notes.push('Not modelled: status effects of the skill, near-range resistance (bNearAtkDef), bSubDefEle, Assumptio, Energy Coat, Safety Wall, Kyrie Eleison, Auto Guard, Parry, Reject Sword, monster buffs (Berserk, Power Up).');
+    if (total.max <= 0) notes.push('Your resistances reduce this attack to 0.');
+    return { kind, skill: { id, lv, name }, hits: dv.n, perHit: out(per), min: total.min, max: total.max, avg: total.avg, hitChance, perfectDodge: 0, dodgeChance: 1 - hitChance, avgWithDodge: total.avg * hitChance,
+      element: rand ? 'Random' : e, elementMod: mod, ranged, need95, breakdown: bd, notes: Array.from(new Set(notes)), perSecond: null, procChance, attackers: n };
+  };
+
+  // incoming(status, mob, D, opts): damage a monster deals to the character. opts = {attackers, ranged, attackAttrNone, mobBaseAtk, skill: {id, lv}, hp, mobHp}.
+  // Without opts.skill: the normal attack (+ perSecond); with it: one use of that monster skill (null when it is not calculated, see mobAttackSkills).
+  const incoming = (st, mob, D, opts) => {
+    const o = opts || {};
+    if (o.skill) return incomingSkill(st, mob, D, o);
+    const bd = [], notes = [], B = (l, v) => bd.push({ label: l, value: v });
+    const n = MX(1, T(+o.attackers || 1));                                                         // unit_counttargeted(player)
+    const defEle = st.armorEle || 'Neutral', defElv = 1;                                           // players: element level 1
+    const mlv = +mob.lv || 1, ms = mob.stats || {};
+    const ranged = o.ranged != null ? !!o.ranged : (+mob.range || 1) >= 4;                         // battle_range_type: skillrange_by_distance (~BL_PC): <= 3 cells short, else long
+    // --- base damage (battle_calc_base_damage 2526-2538, 2570-2571, 2622-2624): atkmin = atk1, atkmax = atk2, (rnd()%(max-min)) + min, + batk
+    const a = Array.isArray(mob.atk) ? mob.atk : [mob.atk, mob.atk];
+    const amax = +a[1] || +a[0] || 0, amin = MN(+a[0] || 0, amax);
+    let d = amax > amin ? R(amin, amax - 1) : R(amin, amin);
+    let batk = 0;
+    if (o.mobBaseAtk) { const s = +ms.STR || 0, q = T(s / 10); batk = MN(65535, MX(0, s + q * q + T((+ms.DEX || 0) / 5) + T((+ms.LUK || 0) / 5))); }   // status_base_atk 2484-2491, only if enable_baseatk includes monsters
+    d = rK(d, batk);
+    B('Monster ATK ' + amin + ' - ' + amax + (batk ? ' + base ATK ' + batk : ''), fmtR(d));
+    const pd = incDef(st, mob, n, B), vn = pd.vn, def1 = pd.def1, vit = pd.vit;
+    d = rLo(rSub(rMul(d, 100 - def1, 100), vit), 1);                                               // damage * (100 - def1) / 100 - vit_def; battle_min_damage 1 (4931)
+    B('After DEF (' + def1 + '%, VIT DEF ' + vit.min + '-' + vit.max + ')', fmtR(d));
+    // --- element: monster normal attacks are Neutral (rhw.ele is never set from the monster element) and attack_attr_none skips attr_fix (3669)
+    const ele = 'Neutral', none = o.attackAttrNone !== false;
+    let elMod = 100;
+    if (none) B('Element ' + ele + ' (attack_attr_none: monster normal attacks are non-elemental)', '100%');
+    else { elMod = attrRatio(D, ele, defEle, defElv); d = rPos(rMul(d, elMod, 100)); B('Element ' + ele + ' vs ' + defEle + ' 1 (' + elMod + '%)', fmtR(d)); }
+    // --- player resistances: battle_calc_cardfix BF_WEAPON target side 1089-1153, in source order, each step on a base of 1000
+    const f = incResist(st, mob, D, ele, 'weapon', ranged, {}, B);
+    if (f !== 1000) d = rPos(applyFix(d, f));
+    // --- Defending Aura: battle_calc_damage 1832-1839, BF_LONG weapon damage, damage -= damage * val2 / 100
+    const df = st.buffInfo && st.buffInfo.defender;
+    if (df && ranged) { const p = +df.longReduction || 0, g = x => x - T(x * p / 100); d = R(g(d.min), g(d.max), d.avg - d.avg * p / 100); B('Defending Aura (ranged) -' + p + '%', fmtR(d)); }
+    // --- landing chance: Lucky Dodge first (5424: rnd()%1000 < flee2), then is_attack_hitting 3258-3317
+    const mobHit = mlv + (+ms.DEX || 0), flee = penFlee(num(st.flee), n);
+    const rawHit = 80 + mobHit - flee, hitChance = MN(INC.maxHit, MX(INC.minHit, rawHit)) / 100;
+    const perfectDodge = MN(1, MX(0, num(st.flee2) / 100)), land = (1 - perfectDodge) * hitChance;
+    B('Monster HIT ' + mobHit + ' vs your Flee ' + flee + (flee !== num(st.flee) ? ' (' + num(st.flee) + ' with ' + n + ' attackers)' : ''), '80 + ' + mobHit + ' - ' + flee + ' = ' + rawHit + ' -> ' + Math.round(hitChance * 1000) / 10 + '%');
+    B('Perfect Dodge', Math.round(perfectDodge * 1000) / 10 + '%');
+    // need95: smallest status Flee whose penalised value (n attackers) drops the hit rate to the min_hitrate floor
+    const need = mobHit + 80 - INC.minHit, pf = n >= INC.agiCount ? 100 - (n - (INC.agiCount - 1)) * INC.agiNum : 100;
+    let need95 = null;
+    if (pf > 0) { need95 = MX(1, Math.ceil(need * 100 / pf)); while (need95 > 1 && penFlee(need95 - 1, n) >= need) need95--; while (penFlee(need95, n) < need) need95++; }
+    // --- damage per second: a monster's attack interval is its adelay (mob_db Delay), never below amotion (status.cpp:6417-6430: adelay = b_status->adelay capped to >= amotion,
+    // aspd_rate can only shorten amotion); the next normal attack waits adelay (unit.cpp is not in the reference copy, standard rAthena). Every attacker swings on its own.
+    const interval = MX(+mob.adelay || 0, +mob.amotion || 0), aps = interval > 0 ? 1000 / interval * n : 0;
+    const perSecond = interval > 0 ? { min: d.min * aps, avg: d.avg * aps, max: d.max * aps, withDodge: d.avg * land * aps } : null;
+    if (perSecond) notes.push('Damage per second: ' + fmt1(aps) + ' attacks per second (1000 / attack delay ' + interval + ' ms' + (n > 1 ? ' x ' + n + ' attackers' : '') + ') x the damage of one attack. An estimate: monsters also spend time walking, casting skills and being knocked back, and a stationary target is assumed.');
+    notes.push('Normal attack. Monsters cannot land critical hits here (enable_critical 17 covers players and mercenaries); pick a monster skill for its numbers.');
+    notes.push('Monster normal attacks are non-elemental' + (none ? ': the armor element does not change the damage (attack_attr_none 14)' : ' (shown with the Neutral table because attackAttrNone is off)') + '; the monster element is only its own defence element.');
+    notes.push('Range: ' + (ranged ? 'long (monster range ' + (+mob.range || 1) + ' >= 4: attacks from more than 3 cells, long-range resistance applies)' : 'short (range ' + (+mob.range || 1) + ', within 3 cells)') + '; a monster standing within 3 cells deals short-range damage whatever its range.');
+    if (n >= INC.agiCount) notes.push(n + ' attackers: Flee -' + (n - (INC.agiCount - 1)) * INC.agiNum + '% (agi_penalty), DEF -' + (vn >= INC.vitCount ? (vn - (INC.vitCount - 1)) * INC.vitNum : 0) + '% (vit_penalty).');
+    if (pf <= 0) notes.push('With ' + n + ' attackers your Flee drops to 1: no Flee is enough for 95% dodge.');
+    notes.push('Not modelled: near-range resistance (bNearAtkDef), bSubDefEle, Assumptio, Energy Coat, Safety Wall, Kyrie Eleison, Auto Guard, Parry, Reject Sword.');
+    if (!batk) notes.push('Monsters have no base ATK / STR bonus (enable_baseatk 0x9 = players and homunculi); set opts.mobBaseAtk to add the compiled-in default.');
+    if (d.max <= 0) notes.push('Your resistances reduce this attack to 0.');
+    return { kind: 'weapon', skill: null, hits: 1, perHit: out(d), min: d.min, max: d.max, avg: d.avg, hitChance, perfectDodge, dodgeChance: 1 - land, avgWithDodge: d.avg * land, element: ele, elementMod: elMod,
+      ranged, need95, breakdown: bd, notes: Array.from(new Set(notes)), perSecond, attackInterval: interval, attackers: n };
+  };
+
+  // ---------- public API ----------
+  const attackSkills = (st, D) => {
+    const res = [];
+    for (const id of DAMAGE_SKILLS) {
+      const lv = get(st.skills, id), cd = D.CALCDATA.skills[id], sk = SK[id];
+      if (lv <= 0 || !cd) continue;
+      if (D.SKT && D.SKT.skills && !D.SKT.skills[id]) continue;
+      if (!weaponOk(st, sk) || (sk.shield && !st.shield)) continue;
+      res.push({ id, name: cd.name, maxLv: cd.maxLv, lv: MN(lv, cd.maxLv), note: sk.undeadOnly ? 'Only damages Undead' + (sk.undeadOrDemon ? ' / Demon' : '') + '-element targets.' : undefined });
+    }
+    return res;
+  };
+
+  const compute = (st, target, skill, D, settings) => {
+    const set = settings || {};
+    const c = mkCtx(st, target, skill, D, set);
+    if (skill && !(c.sk && c.cd)) throw new Error('CalcBattle: no damage formula for ' + skill.id);
+    const sk = c.sk, notes = c.notes;
+    const r = !skill || sk.t === 'w' ? weaponAttack(c) : sk.t === 'm' ? magicAttack(c) : miscAttack(c);
+    // ground / unit skills that tick: the user picks how many ticks land (skill.hits, default from HSEL); one tick = the attack just computed
+    let hitsSelectable = null, tickSpan = 0;
+    const hsf = skill && HSEL[c.id];
+    if (hsf) {
+      const h = hsf(c), dflt = MN(h.def, h.max), req = skill.hits == null || skill.hits === '' ? dflt : Math.trunc(+skill.hits), N = MN(h.max, MX(1, isFinite(req) ? req : dflt));
+      hitsSelectable = { min: 1, max: h.max, default: dflt, selected: N, label: h.label, perInstance: r.n };
+      if (N > 1) { r.total = rScale(r.total, N); r.avgAtk *= N; r.perCast *= N; }
+      r.n *= N;
+      tickSpan = N * Math.ceil(((c.cd && c.cd.unitInterval) || 0) / UNIT_TICK) * UNIT_TICK;      // time the chosen ticks need
+      notes.push(h.note);
+      notes.push('The number of ' + h.label.toLowerCase() + ' depends on where the target stands and whether it moves, freezes or dies: set it to what you expect.');
+      notes.push('DPS = the whole cast (' + N + ' of at most ' + h.max + ' ticks) / (cast time + the longer of the after-cast delay and the ' + tickSpan + ' ms the chosen ticks take); the unit keeps ticking while the delay runs, a second cast on top is not counted.');
+    }
+    if (skill) {
+      if (sk.note) notes.push(sk.note);
+      if (!weaponOk(st, sk)) notes.push('Needs ' + sk.req.join(' / ') + ' equipped.');
+      if (sk.shield && !st.shield) notes.push('Needs a shield equipped.');
+      if (sk.shieldBase) notes.push('Shield Boomerang base ATK is status ATK only: shield refine and weight are not in Status, so the damage is underestimated.');
+      if (sk.riding && !st.riding) notes.push('Needs a mount (settings.riding, with Peco Peco Riding learned).');
+      if (sk.arrow && st.right && st.right.type === 'Bow' && !st.ammo) notes.push('No ammo equipped.');
+      if (c.id === 'MO_FINGEROFFENSIVE' && !c.spheres) notes.push('No Spirit Spheres in the Call Spirits buff.');
+    } else if (st.left && st.left.type !== 'Katar') notes.push('Dual wield: the right hand uses AS_RIGHT, the left hand AS_LEFT.');
+    if (c.buffs.AS_POISONREACT && (!skill || c.id === 'KN_AUTOCOUNTER')) notes.push('Poison React: the +30% per level counter attack is shown; the Envenom counter proc is not in the numbers.');
+    const elementMod = c.flags.IgnoreElement ? 100 : attrRatio(D, r.ele, c.tg.defEle, c.tg.defElv);
+    let castTime = 0, afterCast = 0, attackDelay;
+    if (skill) {
+      castTime = castFix(c, cdAt(c, 'cast', 0));
+      afterCast = delayFix(c, cdAt(c, 'delay', 0));
+      attackDelay = r.kind === 'magic' ? 0 : +st.amotion || 0;                                     // weapon / misc skills cannot repeat faster than the attack motion
+    } else attackDelay = +st.adelay || 0;
+    const cooldown = skill ? cdAt(c, 'cooldown', 0) : 0;                                            // skill cooldown runs next to the after-cast delay
+    const cycle = skill ? MX(castTime + MX(afterCast, cooldown, tickSpan), attackDelay) : (r.cycle != null ? r.cycle : attackDelay);   // basic attack: average cycle incl. the Triple Attack proc delay
+    const dps = cycle > 0 ? r.avgAtk / cycle * 1000 : 0;
+    const hitsToKill = r.perCast > 0 ? Math.ceil(c.tg.hp / r.perCast) : Infinity;
+    const bd = [{ label: 'Hit chance', value: Math.round(r.hit * 1000) / 10 + '%' }];
+    if (r.crit) bd.push({ label: 'Critical chance', value: Math.round(r.crit.chance * 1000) / 10 + '%' });
+    const dbg = c.tg.debuffs || {}, tgE = c.tg;
+    if (dbg.stripArmor || dbg.stripShield || dbg.stripHelm || dbg.eternalChaos) {
+      const parts = [];
+      if (dbg.stripArmor) parts.push('Strip Armor: VIT ' + c.raw.vit + ' -> ' + (c.raw.vit - T(c.raw.vit * 40 / 100)) + ' (-40%)');
+      if (dbg.stripShield) parts.push('Strip Shield: DEF ' + c.raw.def + ' -> ' + tgE.def1 + ' (-15%, before other debuffs)');
+      if (dbg.stripHelm) parts.push('Strip Helm: INT ' + c.raw.int + ' -> ' + (c.raw.int - T(c.raw.int * 40 / 100)) + ' (-40%)');
+      if (dbg.eternalChaos) parts.push('Eternal Chaos: VIT DEF 0');
+      bd.push({ label: 'Target debuffs', value: parts.join('; ') });
+      bd.push({ label: 'Target effective DEF / VIT DEF / MDEF2', value: tgE.def1 + ' / ' + tgE.def2 + ' / ' + tgE.mdef2 });
+      if (dbg.eternalChaos) notes.push('Eternal Chaos sets the target VIT DEF to 0; its hard DEF is unchanged in pre-renewal (status.cpp:7756 is renewal only).');
+    }
+    for (const x of r.bd) bd.push(x);
+    if (c.tg.lex && r.kind === 'weapon') bd.push({ label: 'Lex Aeterna x2 (on the total)', value: fmtR(r.total) });
+    if (hitsSelectable) bd.push({ label: hitsSelectable.label + ' (you choose, 1 - ' + hitsSelectable.max + ')', value: hitsSelectable.selected + ' x ' + hitsSelectable.perInstance + ' hit' + (hitsSelectable.perInstance === 1 ? '' : 's') + ' each = ' + r.n + ' hits, total ' + fmtR(r.total) });
+    bd.push({ label: 'Timing: cast / after-cast / cycle (ms)', value: castTime + ' / ' + afterCast + ' / ' + cycle });
+    return { kind: r.kind, hits: r.n, perHit: out(r.per), total: out(r.total), hands: r.hands, extra: r.extra, crit: r.crit,
+      hitChance: r.hit, avgPerAttack: r.avgAtk, hitsToKill, castTime, afterCast, attackDelay, dps,
+      element: r.ele, elementMod, breakdown: bd, notes: Array.from(new Set(notes)), hitsSelectable };
+  };
+
+  return { targetFromMob, attackSkills, compute, incoming, mobAttackSkills, mobSkillList, mobThresholds, DAMAGE_SKILLS };
+});
