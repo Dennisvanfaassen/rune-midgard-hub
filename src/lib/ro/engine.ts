@@ -8,7 +8,11 @@ export type SktData = {
   jobs: Record<string, { inherit: string[]; tree: [string, number, [string, number][]][] }>;
 };
 export type Engine = {
-  CalcStatus: { compute: (b: any, D: any) => any; validate: (b: any, D: any) => string[] };
+  CalcStatus: {
+    compute: (b: any, D: any) => any; validate: (b: any, D: any) => string[];
+    BUFFS: { id: string; name: string; maxLv: number; group: string; kind: string; values?: string[] }[];
+    SONG_CASTER: Record<string, number>; MANUAL_NUM: string[];
+  };
   D: any;
   items: RoItem[];
   itemsByKey: Record<string, RoItem>;
