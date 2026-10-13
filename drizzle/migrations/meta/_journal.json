@@ -1,5 +1,13 @@
 {
   "version": "7",
   "dialect": "postgresql",
-  "entries": []
+  "entries": [
+    {
+      "idx": 0,
+      "version": "7",
+      "when": 1791909791505,
+      "tag": "0000_guild_schema",
+      "breakpoints": true
+    }
+  ]
 }

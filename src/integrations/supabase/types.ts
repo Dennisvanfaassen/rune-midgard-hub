@@ -14,13 +14,158 @@ export type Database = {
   }
   public: {
     Tables: {
-      [_ in never]: never
+      gear_wishlist: {
+        Row: {
+          created_at: string
+          id: string
+          item_key: string
+          item_name: string
+          item_type: string | null
+          note: string | null
+          status: string
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          item_key: string
+          item_name: string
+          item_type?: string | null
+          note?: string | null
+          status?: string
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          item_key?: string
+          item_name?: string
+          item_type?: string | null
+          note?: string | null
+          status?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
+      parties: {
+        Row: {
+          created_at: string
+          creator_id: string
+          id: string
+          notes: string | null
+          place: string
+          starts_at: string
+          template: string | null
+          title: string
+        }
+        Insert: {
+          created_at?: string
+          creator_id: string
+          id?: string
+          notes?: string | null
+          place: string
+          starts_at: string
+          template?: string | null
+          title: string
+        }
+        Update: {
+          created_at?: string
+          creator_id?: string
+          id?: string
+          notes?: string | null
+          place?: string
+          starts_at?: string
+          template?: string | null
+          title?: string
+        }
+        Relationships: []
+      }
+      party_slots: {
+        Row: {
+          char_name: string | null
+          id: string
+          job: string | null
+          party_id: string
+          position: number
+          role: string
+          user_id: string | null
+        }
+        Insert: {
+          char_name?: string | null
+          id?: string
+          job?: string | null
+          party_id: string
+          position: number
+          role?: string
+          user_id?: string | null
+        }
+        Update: {
+          char_name?: string | null
+          id?: string
+          job?: string | null
+          party_id?: string
+          position?: number
+          role?: string
+          user_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "party_slots_party_id_fkey"
+            columns: ["party_id"]
+            isOneToOne: false
+            referencedRelation: "parties"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      profiles: {
+        Row: {
+          base_lv: number
+          bio: string | null
+          char_name: string | null
+          created_at: string
+          display_name: string
+          id: string
+          job: string
+          job_lv: number
+          skill_build: Json | null
+          stat_build: Json | null
+          updated_at: string
+        }
+        Insert: {
+          base_lv?: number
+          bio?: string | null
+          char_name?: string | null
+          created_at?: string
+          display_name?: string
+          id: string
+          job?: string
+          job_lv?: number
+          skill_build?: Json | null
+          stat_build?: Json | null
+          updated_at?: string
+        }
+        Update: {
+          base_lv?: number
+          bio?: string | null
+          char_name?: string | null
+          created_at?: string
+          display_name?: string
+          id?: string
+          job?: string
+          job_lv?: number
+          skill_build?: Json | null
+          stat_build?: Json | null
+          updated_at?: string
+        }
+        Relationships: []
+      }
     }
     Views: {
       [_ in never]: never
     }
     Functions: {
-      [_ in never]: never
+      is_party_creator: { Args: { _party: string }; Returns: boolean }
     }
     Enums: {
       [_ in never]: never
