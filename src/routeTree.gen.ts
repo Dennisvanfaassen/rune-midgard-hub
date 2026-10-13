@@ -12,6 +12,7 @@ import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as AuthRouteImport } from './routes/auth'
 import { Route as CalculatorRouteImport } from './routes/calculator'
+import { Route as MarketRouteImport } from './routes/market'
 import { Route as SkillsRouteImport } from './routes/skills'
 import { Route as WishlistsRouteImport } from './routes/wishlists'
 import { Route as ForumIndexRouteImport } from './routes/forum.index'
@@ -35,6 +36,11 @@ const AuthRoute = AuthRouteImport.update({
 const CalculatorRoute = CalculatorRouteImport.update({
   id: '/calculator',
   path: '/calculator',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const MarketRoute = MarketRouteImport.update({
+  id: '/market',
+  path: '/market',
   getParentRoute: () => rootRouteImport,
 } as any)
 const SkillsRoute = SkillsRouteImport.update({
@@ -87,6 +93,7 @@ export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/auth': typeof AuthRoute
   '/calculator': typeof CalculatorRoute
+  '/market': typeof MarketRoute
   '/skills': typeof SkillsRoute
   '/wishlists': typeof WishlistsRoute
   '/forum/$id': typeof ForumIdRoute
@@ -101,6 +108,7 @@ export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/auth': typeof AuthRoute
   '/calculator': typeof CalculatorRoute
+  '/market': typeof MarketRoute
   '/skills': typeof SkillsRoute
   '/wishlists': typeof WishlistsRoute
   '/forum/$id': typeof ForumIdRoute
@@ -116,6 +124,7 @@ export interface FileRoutesById {
   '/': typeof IndexRoute
   '/auth': typeof AuthRoute
   '/calculator': typeof CalculatorRoute
+  '/market': typeof MarketRoute
   '/skills': typeof SkillsRoute
   '/wishlists': typeof WishlistsRoute
   '/forum/$id': typeof ForumIdRoute
@@ -132,6 +141,7 @@ export interface FileRouteTypes {
     | '/'
     | '/auth'
     | '/calculator'
+    | '/market'
     | '/skills'
     | '/wishlists'
     | '/forum/$id'
@@ -146,6 +156,7 @@ export interface FileRouteTypes {
     | '/'
     | '/auth'
     | '/calculator'
+    | '/market'
     | '/skills'
     | '/wishlists'
     | '/forum/$id'
@@ -160,6 +171,7 @@ export interface FileRouteTypes {
     | '/'
     | '/auth'
     | '/calculator'
+    | '/market'
     | '/skills'
     | '/wishlists'
     | '/forum/$id'
@@ -175,6 +187,7 @@ export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   AuthRoute: typeof AuthRoute
   CalculatorRoute: typeof CalculatorRoute
+  MarketRoute: typeof MarketRoute
   SkillsRoute: typeof SkillsRoute
   WishlistsRoute: typeof WishlistsRoute
   ForumIdRoute: typeof ForumIdRoute
@@ -207,6 +220,13 @@ declare module '@tanstack/react-router' {
       path: '/calculator'
       fullPath: '/calculator'
       preLoaderRoute: typeof CalculatorRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/market': {
+      id: '/market'
+      path: '/market'
+      fullPath: '/market'
+      preLoaderRoute: typeof MarketRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/skills': {
@@ -279,6 +299,7 @@ const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   AuthRoute: AuthRoute,
   CalculatorRoute: CalculatorRoute,
+  MarketRoute: MarketRoute,
   SkillsRoute: SkillsRoute,
   WishlistsRoute: WishlistsRoute,
   ForumIdRoute: ForumIdRoute,
