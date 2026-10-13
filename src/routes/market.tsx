@@ -1,0 +1,125 @@
+import { createFileRoute, Link } from "@tanstack/react-router";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useEffect, useMemo, useState } from "react";
+import { toast } from "sonner";
+import { Coins } from "lucide-react";
+import { supabase } from "@/integrations/supabase/client";
+import { useAuth } from "@/lib/auth";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
+import { Label } from "@/components/ui/label";
+import { CharacterPortrait } from "@/components/CharacterPortrait";
+import { loadEngine, type Engine, type RoItem } from "@/lib/ro/engine";
+import { itemLabel } from "@/lib/ro/jobs";
+import { itemDisplay } from "@/lib/ro/slots";
+import { formatZeny } from "@/lib/forum";
+
+export const Route = createFileRoute("/market")({
+  head: () => ({ meta: [
+    { title: "Guild Marketplace · Rune Midgard" },
+    { name: "description", content: "Buy and sell items to Rune Midgard guildmates for guild prices." },
+    { property: "og:title", content: "Guild Marketplace · Rune Midgard" },
+    { property: "og:description", content: "Buy and sell items to Rune Midgard guildmates for guild prices." },
+    { property: "og:type", content: "website" },
+    { name: "twitter:card", content: "summary_large_image" },
+  ] }),
+  component: Market,
+});
+
+export function useListings(limit?: number) {
+  return useQuery({
+    queryKey: ["market", limit ?? "all"],
+    queryFn: async () => {
+      let q = supabase.from("market_listings").select("*,profiles(id,display_name,char_name,avatar_path)").order("created_at", { ascending: false });
+      if (limit) q = q.eq("status", "open").limit(limit);
+      const { data, error } = await q; if (error) throw error; return data;
+    },
+  });
+}
+
+type Listing = NonNullable<ReturnType<typeof useListings>["data"]>[number];
+
+export function ListingCard({ l, mine, onChange }: { l: Listing; mine?: boolean; onChange?: () => void }) {
+  const p = l.profiles;
+  async function setStatus(status: string) { const { error } = await supabase.from("market_listings").update({ status }).eq("id", l.id); if (error) toast.error(error.message); else onChange?.(); }
+  async function remove() { if (!confirm("Remove this listing?")) return; const { error } = await supabase.from("market_listings").delete().eq("id", l.id); if (error) toast.error(error.message); else onChange?.(); }
+  return <article className={"flex flex-col rounded-lg border bg-card p-4 " + (l.status === "open" ? "border-border" : "border-border opacity-60")}>
+    <div className="flex items-start gap-2">
+      <div className="min-w-0 flex-1"><h3 className="font-semibold">{itemDisplay(l.item_key, l.item_name)}{l.quantity > 1 && <span className="text-muted-foreground"> ×{l.quantity}</span>}</h3>
+        {l.status !== "open" && <span className="text-xs font-semibold uppercase text-accent">{l.status}</span>}</div>
+      <div className="flex items-center gap-1 rounded-md bg-secondary px-2 py-1 font-bold text-primary"><Coins className="h-4 w-4" />{formatZeny(l.price)}</div>
+    </div>
+    {l.quantity > 1 && <p className="text-xs text-muted-foreground">{formatZeny(l.price / l.quantity)} each</p>}
+    {l.note && <p className="mt-2 whitespace-pre-line text-sm text-muted-foreground">{l.note}</p>}
+    {p && <Link to="/members/$id" params={{ id: p.id }} className="mt-auto flex items-center gap-2 pt-3 text-sm">
+      <CharacterPortrait path={p.avatar_path} name={p.char_name || p.display_name} className="h-8 w-7" /><span>Sold by <span className="font-semibold text-primary">{p.char_name || p.display_name}</span></span>
+    </Link>}
+    {mine && <div className="mt-3 flex flex-wrap gap-1">
+      {(["open", "reserved", "sold"] as const).map((s) => <Button key={s} size="sm" variant={l.status === s ? "default" : "outline"} className="h-7 text-xs capitalize" onClick={() => setStatus(s)}>{s}</Button>)}
+      <Button size="sm" variant="ghost" className="h-7 text-xs text-destructive" onClick={remove}>Remove</Button>
+    </div>}
+  </article>;
+}
+
+function Market() {
+  const { userId } = useAuth();
+  const qc = useQueryClient();
+  const listings = useListings();
+  const [q, setQ] = useState("");
+  const [show, setShow] = useState("open");
+  const [open, setOpen] = useState(false);
+  const refresh = () => qc.invalidateQueries({ queryKey: ["market"] });
+  const list = (listings.data ?? []).filter((l) => (show === "all" || (show === "mine" ? l.seller_id === userId : l.status === show)) && itemDisplay(l.item_key, l.item_name).toLowerCase().includes(q.toLowerCase()));
+  return <main className="mx-auto max-w-6xl px-4 py-10">
+    <div className="flex flex-wrap items-center justify-between gap-3">
+      <div><h1 className="text-4xl font-bold">Guild Marketplace</h1><p className="text-muted-foreground">Guild prices for guildmates. Contact the seller in game or on Discord.</p></div>
+      {userId ? <Button onClick={() => setOpen(!open)}>{open ? "Cancel" : "Sell an item"}</Button> : <Button asChild variant="outline"><Link to="/auth">Sign in to sell</Link></Button>}
+    </div>
+    {open && userId && <NewListing userId={userId} onDone={() => { setOpen(false); refresh(); }} />}
+    <div className="mt-6 flex flex-wrap gap-3">
+      <Input aria-label="Search items" className="max-w-sm" placeholder="Search items" value={q} onChange={(e) => setQ(e.target.value)} />
+      <div className="flex gap-1">{[["open", "For sale"], ["all", "All"], ...(userId ? [["mine", "My listings"]] : [])].map(([k, label]) => <Button key={k} size="sm" variant={show === k ? "default" : "outline"} onClick={() => setShow(k ?? "open")}>{label}</Button>)}</div>
+    </div>
+    {listings.isLoading && <p className="mt-6 text-muted-foreground">Loading…</p>}
+    {listings.isError && <p className="mt-6 text-destructive">Could not load the marketplace.</p>}
+    <div className="mt-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+      {list.map((l) => <ListingCard key={l.id} l={l} mine={l.seller_id === userId} onChange={refresh} />)}
+    </div>
+    {!listings.isLoading && list.length === 0 && <p className="mt-6 text-muted-foreground">No items listed.</p>}
+  </main>;
+}
+
+function NewListing({ userId, onDone }: { userId: string; onDone: () => void }) {
+  const [engine, setEngine] = useState<Engine | null>(null);
+  useEffect(() => { loadEngine().then(setEngine); }, []);
+  const [search, setSearch] = useState("");
+  const [item, setItem] = useState<RoItem | null>(null);
+  const [f, setF] = useState({ quantity: "1", price: "", note: "" });
+  const [busy, setBusy] = useState(false);
+  const results = useMemo(() => !engine || search.length < 2 || item ? [] : engine.items.filter((i) => i.name.toLowerCase().includes(search.toLowerCase())).slice(0, 10), [engine, search, item]);
+  async function submit() {
+    const name = item ? itemLabel(item) : search.trim();
+    const price = Math.round(Number(f.price.replace(/[^\d]/g, "")));
+    const quantity = Math.round(Number(f.quantity));
+    if (!name) { toast.error("Choose an item"); return; }
+    if (!Number.isFinite(price) || f.price.trim() === "" || price < 0) { toast.error("Enter your asking price in zeny"); return; }
+    if (!(quantity >= 1 && quantity <= 30000)) { toast.error("Quantity must be 1 to 30,000"); return; }
+    setBusy(true);
+    const { error } = await supabase.from("market_listings").insert({ seller_id: userId, item_key: item?.key ?? `custom:${name}`, item_name: name, quantity, price, note: f.note.trim() || null });
+    setBusy(false);
+    if (error) toast.error(error.message); else { toast.success("Listed on the marketplace"); onDone(); }
+  }
+  return <div className="mt-6 grid gap-3 rounded-lg border border-border bg-card p-4 sm:grid-cols-4">
+    <div className="relative space-y-1 sm:col-span-2"><Label>Item</Label>
+      <Input placeholder={engine ? "Search item (e.g. Manteau)" : "Loading item list…"} value={item ? itemLabel(item) : search} onChange={(e) => { setItem(null); setSearch(e.target.value); }} />
+      {results.length > 0 && <div className="absolute z-10 mt-1 w-full divide-y divide-border rounded-md border border-border bg-popover shadow-lg">
+        {results.map((i) => <button key={i.key} className="flex w-full justify-between px-3 py-2 text-left text-sm hover:bg-secondary" onClick={() => setItem(i)}><span>{itemLabel(i)}</span><span className="text-xs text-muted-foreground">{i.type}</span></button>)}
+      </div>}
+    </div>
+    <div className="space-y-1"><Label>Quantity</Label><Input type="number" min={1} max={30000} value={f.quantity} onChange={(e) => setF({ ...f, quantity: e.target.value })} /></div>
+    <div className="space-y-1"><Label>Total price (zeny)</Label><Input inputMode="numeric" placeholder="e.g. 250000" value={f.price} onChange={(e) => setF({ ...f, price: e.target.value })} /></div>
+    <div className="space-y-1 sm:col-span-4"><Label>Note</Label><Textarea maxLength={500} placeholder="Refine, cards, where to meet…" value={f.note} onChange={(e) => setF({ ...f, note: e.target.value })} /></div>
+    <div className="sm:col-span-4"><Button disabled={busy} onClick={submit}>List item{f.price && Number.isFinite(+f.price.replace(/[^\d]/g, "")) ? ` for ${formatZeny(+f.price.replace(/[^\d]/g, ""))}` : ""}</Button></div>
+  </div>;
+}
