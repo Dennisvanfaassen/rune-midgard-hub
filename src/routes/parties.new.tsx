@@ -82,7 +82,7 @@ function NewParty() {
       <div className="mt-6 grid gap-4 rounded-lg border border-border bg-card p-6 sm:grid-cols-2">
         <div className="space-y-1 sm:col-span-2"><Label>Title</Label><Input value={f.title} maxLength={80} placeholder="Baphomet hunt" onChange={(e) => setF({ ...f, title: e.target.value })} /></div>
         <div className="space-y-1"><Label>Date</Label><Input type="date" value={f.date} onChange={(e) => setF({ ...f, date: e.target.value })} /></div>
-        <div className="space-y-1"><Label>Time</Label><Input type="time" value={f.time} onChange={(e) => setF({ ...f, time: e.target.value })} /></div>
+        <div className="space-y-1"><Label>Time (your local time)</Label><Input type="time" value={f.time} onChange={(e) => setF({ ...f, time: e.target.value })} /></div>
         <div className="space-y-1 sm:col-span-2"><Label>Place</Label><Input value={f.place} maxLength={80} placeholder="Prontera south gate / Glast Heim" onChange={(e) => setF({ ...f, place: e.target.value })} /></div>
         <div className="space-y-1 sm:col-span-2"><Label>Notes</Label><Textarea value={f.notes} maxLength={1000} placeholder="Bring Yggdrasil Berries…" onChange={(e) => setF({ ...f, notes: e.target.value })} /></div>
       </div>

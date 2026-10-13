@@ -6,7 +6,7 @@ import { useAuth } from "@/lib/auth";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { JobSelect, fieldClass } from "@/components/JobSelect";
-import { jobName } from "@/lib/ro/jobs";
+import { jobName, itemLabel } from "@/lib/ro/jobs";
 import { SLOTS, cardFits, fitsSlot, loadEngine, type Engine } from "@/lib/ro/engine";
 import { CalculatorOptions, emptyOptions, type BuildOptions } from "@/components/CalculatorOptions";
 import { CombatOptions, defaultCombat, type CombatSelection } from "@/components/CombatOptions";
@@ -135,7 +135,7 @@ function Calculator() {
                       <span className="w-32 text-sm text-muted-foreground">{label}</span>
                       <select className={fieldClass + " min-w-48 flex-1"} value={e?.key ?? ""} onChange={(ev) => setSlot(slot, { key: ev.target.value, cards: [] })}>
                         <option value="">— none —</option>
-                        {(usable[slot] ?? []).map((i: Engine["items"][number]) => <option key={i.key} value={i.key}>{i.name}{i.slots ? ` [${i.slots}]` : ""}</option>)}
+                        {(usable[slot] ?? []).map((i: Engine["items"][number]) => <option key={i.key} value={i.key}>{itemLabel(i)}</option>)}
                       </select>
                       {item && slot !== "ammo" && (
                         <select aria-label={`${label} refinement`} className={fieldClass} value={e?.refine ?? 0} onChange={(ev) => setSlot(slot, { refine: +ev.target.value })}>

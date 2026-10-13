@@ -1,11 +1,18 @@
 import { describe, expect, it } from "vitest";
-import { MAX_PARTY_SIZE, PARTY_TEMPLATES, canAddSlot, canTakeSlot, isPartyVisible } from "./jobs";
+import { MAX_PARTY_SIZE, PARTY_TEMPLATES, canAddSlot, canTakeSlot, isPartyVisible, partyCountdown, itemLabel } from "./jobs";
 
 describe("party rules", () => {
-  it("hides a party exactly one day after its scheduled time", () => {
+  it("hides a party exactly 4 hours after its scheduled time", () => {
     const start = "2026-10-13T20:00:00Z";
-    expect(isPartyVisible(start, Date.parse("2026-10-14T19:59:59Z"))).toBe(true);
-    expect(isPartyVisible(start, Date.parse("2026-10-14T20:00:00Z"))).toBe(false);
+    expect(isPartyVisible(start, Date.parse("2026-10-13T23:59:59Z"))).toBe(true);
+    expect(isPartyVisible(start, Date.parse("2026-10-14T00:00:00Z"))).toBe(false);
+  });
+  it("shows a countdown to the party start", () => {
+    expect(partyCountdown("2026-10-13T20:00:00Z", Date.parse("2026-10-13T18:48:00Z"))).toBe("Party starts in 1 hour and 12 minutes");
+  });
+  it("adds the slot count to slotted item names", () => {
+    expect(itemLabel({ name: "Sword", slots: 3 })).toBe("Sword [3]");
+    expect(itemLabel({ name: "Cap", slots: 0 })).toBe("Cap");
   });
   it("allows different classes to volunteer for mobber and tank roles", () => {
     expect(canTakeSlot("Mobber", "Knight")).toBe(true);

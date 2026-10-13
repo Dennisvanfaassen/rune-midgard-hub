@@ -9,9 +9,26 @@ export const jobName = (j: string) => (j === "Supernovice" ? "Super Novice" : j)
 
 export const MAX_PARTY_SIZE = 12;
 export const PARTY_ROLES = ["Any", "Tank", "Mobber", "Tapper", "SP", "Bragi", "Other"];
-export const PARTY_VISIBLE_FOR_MS = 24 * 60 * 60 * 1000;
+export const PARTY_VISIBLE_FOR_MS = 4 * 60 * 60 * 1000;
 export const partyCutoff = (now = Date.now()) => new Date(now - PARTY_VISIBLE_FOR_MS).toISOString();
 export const isPartyVisible = (startsAt: string, now = Date.now()) => new Date(startsAt).getTime() + PARTY_VISIBLE_FOR_MS > now;
+
+/** Party time shown in the viewer's own timezone. */
+export const formatPartyTime = (startsAt: string) =>
+  new Date(startsAt).toLocaleString(undefined, { weekday: "short", day: "numeric", month: "short", hour: "2-digit", minute: "2-digit", timeZoneName: "short" });
+
+/** "Party starts in 1 hour and 12 minutes" relative to the viewer's clock. */
+export const partyCountdown = (startsAt: string, now = Date.now()) => {
+  const mins = Math.round((new Date(startsAt).getTime() - now) / 60000);
+  if (mins <= 0) return mins > -PARTY_VISIBLE_FOR_MS / 60000 ? "Party has started" : "Party has ended";
+  const d = Math.floor(mins / 1440), h = Math.floor((mins % 1440) / 60), m = mins % 60;
+  const part = (n: number, w: string) => `${n} ${w}${n === 1 ? "" : "s"}`;
+  const bits = [d && part(d, "day"), h && part(h, "hour"), m && part(m, "minute")].filter(Boolean) as string[];
+  return `Party starts in ${bits.length > 1 ? bits.slice(0, -1).join(", ") + " and " + bits.at(-1) : bits[0]}`;
+};
+
+/** Item name with card slot count, e.g. "Sword [3]". */
+export const itemLabel = (i: { name: string; slots?: number | null }) => (i.slots ? `${i.name} [${i.slots}]` : i.name);
 
 export type PartyTemplate = { id: string; name: string; description: string; roles: string[] };
 

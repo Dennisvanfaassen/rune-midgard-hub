@@ -6,7 +6,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/lib/auth";
 import { Button } from "@/components/ui/button";
 import { JobSelect } from "@/components/JobSelect";
-import { MAX_PARTY_SIZE, partyCutoff, canAddSlot, canTakeSlot, jobName } from "@/lib/ro/jobs";
+import { MAX_PARTY_SIZE, partyCutoff, canAddSlot, canTakeSlot, jobName, formatPartyTime, partyCountdown } from "@/lib/ro/jobs";
 
 export const Route = createFileRoute("/parties/$id")({
   head: () => ({
@@ -71,7 +71,8 @@ function PartyPage() {
     <main className="mx-auto max-w-4xl px-4 py-10">
       <Link to="/parties" className="text-sm text-primary">← All parties</Link>
       <h1 className="mt-2 text-4xl font-bold">{party.title}</h1>
-      <p className="mt-2 text-muted-foreground">{new Date(party.starts_at).toLocaleString()} · {party.place} · organised by {party.profiles?.display_name}</p>
+      <p className="mt-2 text-muted-foreground">{formatPartyTime(party.starts_at)} · {party.place} · organised by {party.profiles?.display_name}</p>
+      <p className="mt-2 font-semibold text-primary">{partyCountdown(party.starts_at)}</p>
       {party.notes && <p className="mt-4 whitespace-pre-line rounded-lg border border-border bg-card p-4">{party.notes}</p>}
 
       <div className="mt-8 flex flex-wrap items-center gap-3">
