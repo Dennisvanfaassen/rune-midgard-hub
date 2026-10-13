@@ -1,9 +1,8 @@
 # Guild updates
-- [x] Shared role-based party template dropdown and template creation
-- [x] Hide parties 24 hours after start; creator deletion
-- [x] Shared wishlist page and newest homepage wishlists
-- [x] Character picture upload and member portraits (external character simulator link; no embedded generator)
-- [x] Expand calculator options using the existing engine; save buffs, foods, songs, pets, forging, bonuses and combat targets
-- [x] Visual skill grid
-- [x] Blue bird logo and homepage community sections
-- [x] Verify signed-in template creation/join/delete, portrait upload, wishlist toggle, saved builds; public wishlists, expiry and narrow layouts; 8 tests passed
+- [x] Shared role-based party templates, 4-hour expiry, creator deletion, local times + countdown
+- [x] Shared wishlists, character portraits, calculator options, skill grid, logo, homepage sections
+- [x] Slot counts shown on all items (incl. saved wishlist entries)
+- [x] Forum with categories, topics, replies, edit/delete
+- [x] Wishlist help offers ("I got this" / "I'll help hunt")
+- [x] Marketplace with zeny prices, homepage section, nav between Wishlists and Stat Calculator
+- [ ] Discord #party-planner announcements — waiting on the user's webhook URL
