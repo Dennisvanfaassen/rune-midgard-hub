@@ -22,7 +22,7 @@ const StoredImage = Image.extend({
   addAttributes() {
     return {
       ...this.parent?.(),
-      path: { default: null, parseHTML: (el) => el.getAttribute("data-path"), renderHTML: (a) => (a.path ? { "data-path": a.path } : {}) },
+      path: { default: null, parseHTML: (el) => el.getAttribute("data-path"), renderHTML: (a) => (a["path"] ? { "data-path": a["path"] } : {}) },
     };
   },
 });
@@ -42,11 +42,11 @@ export function sanitize(html: string) {
 export async function resolveImages(html: string) {
   const doc = new DOMParser().parseFromString(sanitize(html), "text/html");
   const imgs = [...doc.querySelectorAll<HTMLImageElement>("img[data-path]")];
-  const paths = [...new Set(imgs.map((i) => i.dataset.path!).filter(Boolean))];
+  const paths = [...new Set(imgs.map((i) => i.dataset["path"]!).filter(Boolean))];
   if (paths.length) {
     const { data } = await supabase.storage.from(BUCKET).createSignedUrls(paths, 60 * 60 * 6);
     const map = new Map((data ?? []).map((d) => [d.path, d.signedUrl]));
-    imgs.forEach((i) => { const u = map.get(i.dataset.path!); if (u) i.src = u; });
+    imgs.forEach((i) => { const u = map.get(i.dataset["path"]!); if (u) i.src = u; });
   }
   doc.querySelectorAll("a").forEach((a) => { a.target = "_blank"; a.rel = "noopener noreferrer nofollow"; });
   return doc.body.innerHTML;
