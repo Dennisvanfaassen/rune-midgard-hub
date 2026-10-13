@@ -5,4 +5,4 @@
 - [x] Forum with categories, topics, replies, edit/delete
 - [x] Wishlist help offers ("I got this" / "I'll help hunt")
 - [x] Marketplace with zeny prices, homepage section, nav between Wishlists and Stat Calculator
-- [ ] Discord #party-planner announcements — waiting on the user's webhook URL
+- [x] Discord #party-planner announcements (webhook saved)
