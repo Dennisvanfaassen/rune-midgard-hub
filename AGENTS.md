@@ -18,3 +18,4 @@
 - Saved item names render through src/lib/ro/slots.ts itemDisplay(item_key, name) so slot counts come from the item DB, not stored text.
 - Forum (forum_threads/forum_posts), wishlist_help and market_listings are public-read, owner-write tables; forum categories live in src/lib/forum.ts.
 - Discord party announcements run server-side in src/lib/discord.functions.ts via the DISCORD_PARTY_WEBHOOK_URL secret; skip silently when unset.
+- Forum bodies are sanitized HTML from src/components/RichText.tsx (TipTap); images live in the private forum-images bucket, keep data-path on <img> and resolve signed links at render.
