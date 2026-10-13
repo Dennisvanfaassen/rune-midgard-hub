@@ -7,12 +7,13 @@ export const announceParty = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((d: unknown) => z.object({ partyId: z.string().uuid(), origin: z.string().url() }).parse(d))
   .handler(async ({ data, context }) => {
-    const webhook = process.env["DISCORD_PARTY_WEBHOOK_URL"];
-    if (!webhook || !/^https:\/\/(discord|discordapp)\.com\/api\/webhooks\//.test(webhook)) return { sent: false, reason: "not_configured" };
+    const webhook = process.env["DISCORD_PARTY_WEBHOOK_URL"]?.trim();
+    if (!webhook) { console.error("Discord announce: webhook not configured"); return { sent: false, reason: "not_configured" }; }
+    if (!/^https:\/\/((ptb|canary)\.)?(discord|discordapp)\.com\/api\/webhooks\//.test(webhook)) { console.error("Discord announce: webhook link not recognised"); return { sent: false, reason: "bad_link" }; }
     const { data: p } = await context.supabase.from("parties")
       .select("id,title,place,notes,starts_at,creator_id,profiles(display_name,char_name),party_slots(position,role,user_id)")
       .eq("id", data.partyId).maybeSingle();
-    if (!p || p.creator_id !== context.userId) return { sent: false, reason: "not_allowed" };
+    if (!p || p.creator_id !== context.userId) { console.error("Discord announce: party not found or not creator", data.partyId); return { sent: false, reason: "not_allowed" }; }
     const ts = Math.floor(new Date(p.starts_at).getTime() / 1000);
     const slots = [...p.party_slots].sort((a, b) => a.position - b.position);
     const roles = slots.map((s, i) => `\`${String(i + 1).padStart(2, " ")}\` ${s.role === "Any" ? "Any class" : s.role === "Supernovice" ? "Super Novice" : s.role}`).join("\n");
@@ -33,6 +34,13 @@ export const announceParty = createServerFn({ method: "POST" })
       timestamp: new Date().toISOString(),
     };
     const res = await fetch(webhook, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ username: "Rune Midgard", embeds: [embed], allowed_mentions: { parse: [] } }) });
-    if (!res.ok) { console.error(`Discord webhook failed [${res.status}]: ${await res.text()}`); return { sent: false, reason: "discord_error" }; }
+    if (!res.ok) { console.error(`Discord webhook failed [${res.status}]: ${await res.text()}`); return { sent: false, reason: "discord_error", status: res.status }; }
     return { sent: true };
   });
+
+export const DISCORD_REASON: Record<string, string> = {
+  not_configured: "Discord link is not set up yet",
+  bad_link: "The saved Discord link isn't a webhook link",
+  not_allowed: "Only the organiser can post this party",
+  discord_error: "Discord refused the message",
+};

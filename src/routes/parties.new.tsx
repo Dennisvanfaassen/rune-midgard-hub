@@ -4,7 +4,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { z } from "zod";
 import { useServerFn } from "@tanstack/react-start";
-import { announceParty } from "@/lib/discord.functions";
+import { announceParty, DISCORD_REASON } from "@/lib/discord.functions";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/lib/auth";
 import { Button } from "@/components/ui/button";
@@ -76,7 +76,7 @@ function NewParty() {
     const { error: e2 } = await supabase.from("party_slots").insert(roles.map((role, position) => ({ party_id: data.id, position, role })));
     setBusy(false);
     if (e2) { toast.error(e2.message); return; }
-    announce({ data: { partyId: data.id, origin: window.location.origin } }).then((r) => { if (r.sent) toast.success("Posted to Discord #party-planner"); }).catch(() => {});
+    announce({ data: { partyId: data.id, origin: window.location.origin } }).then((r) => { if (r.sent) toast.success("Posted to Discord #party-planner"); else toast.error(`Not posted to Discord: ${DISCORD_REASON[r.reason ?? ""] ?? "unknown problem"}`); }).catch((e) => toast.error(`Not posted to Discord: ${e instanceof Error ? e.message : "network error"}`));
     navigate({ to: "/parties/$id", params: { id: data.id } });
   }
 
