@@ -57,7 +57,7 @@ function Home() {
             {(parties.data ?? []).map((p) => (
               <Link key={p.id} to="/parties/$id" params={{ id: p.id }} className="block rounded-lg border border-border bg-card p-4 hover:border-primary">
                 <div className="font-semibold">{p.title}</div>
-                <div className="text-sm text-muted-foreground">{new Date(p.starts_at).toLocaleString()} · {p.place} · {p.party_slots.filter((s) => s.user_id).length}/{p.party_slots.length} joined</div>
+                <div className="text-sm text-muted-foreground">{formatPartyTime(p.starts_at)} · {partyCountdown(p.starts_at)} · {p.place} · {p.party_slots.filter((s) => s.user_id).length}/{p.party_slots.length} joined</div>
               </Link>
             ))}
             {parties.data?.length === 0 && <p className="text-sm text-muted-foreground">No parties planned yet.</p>}

@@ -2,7 +2,7 @@ import { createFileRoute, Link } from "@tanstack/react-router";
 import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/lib/auth";
-import { partyCutoff } from "@/lib/ro/jobs";
+import { partyCutoff, formatPartyTime, partyCountdown } from "@/lib/ro/jobs";
 import { Button } from "@/components/ui/button";
 
 export const Route = createFileRoute("/parties/")({
@@ -42,7 +42,8 @@ function Parties() {
             <Link key={p.id} to="/parties/$id" params={{ id: p.id }} className="flex flex-wrap items-center gap-4 rounded-lg border border-border bg-card p-4 hover:border-primary">
               <div>
                 <div className="font-display text-lg font-bold">{p.title}</div>
-                <div className="text-sm text-muted-foreground">{new Date(p.starts_at).toLocaleString()} · {p.place} · by {p.profiles?.display_name}</div>
+                <div className="text-sm text-muted-foreground">{formatPartyTime(p.starts_at)} · {p.place} · by {p.profiles?.display_name}</div>
+                <div className="text-sm font-semibold text-primary">{partyCountdown(p.starts_at)}</div>
               </div>
               <div className="ml-auto rounded-md bg-secondary px-3 py-1 text-sm"><span className="text-primary">{filled}</span>/{p.party_slots.length} members</div>
             </Link>
