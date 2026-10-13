@@ -9,6 +9,7 @@ import { JobSelect, fieldClass } from "@/components/JobSelect";
 import { jobName } from "@/lib/ro/jobs";
 import { SLOTS, cardFits, fitsSlot, loadEngine, type Engine } from "@/lib/ro/engine";
 import { CalculatorOptions, emptyOptions, type BuildOptions } from "@/components/CalculatorOptions";
+import { CombatOptions, defaultCombat, type CombatSelection } from "@/components/CombatOptions";
 
 export const Route = createFileRoute("/calculator")({
   head: () => ({
@@ -37,6 +38,7 @@ function Calculator() {
   const [equip, setEquip] = useState<Equip>({});
   const [skills, setSkills] = useState<Record<string, number>>({});
   const [options, setOptions] = useState<BuildOptions>(emptyOptions);
+  const [combat, setCombat] = useState<CombatSelection>(defaultCombat);
 
   useEffect(() => { loadEngine().then(setEngine).catch(() => toast.error("Could not load game data")); }, []);
   // Load own saved build
@@ -47,13 +49,14 @@ function Calculator() {
       if (sb?.build) {
         setJob(sb.build.job); setBaseLv(sb.build.baseLv); setJobLv(sb.build.jobLv); setStats(sb.build.stats); setEquip(sb.build.equip ?? {});
         setOptions({ buffs: sb.build.buffs ?? {}, manual: sb.build.manual ?? {}, pet: sb.build.pet ?? null, settings: sb.build.settings ?? {} });
+        if (sb.build.combat) setCombat(sb.build.combat);
       } else if (data) { setJob(data.job); setBaseLv(data.base_lv); setJobLv(data.job_lv); }
       const kb = data?.skill_build as any;
       if (kb?.lv) setSkills(kb.lv);
     });
   }, [userId]);
 
-  const build = useMemo(() => ({ job, baseLv, jobLv, stats, skills, equip, ...options }), [job, baseLv, jobLv, stats, skills, equip, options]);
+  const build = useMemo(() => ({ job, baseLv, jobLv, stats, skills, equip, ...options, combat }), [job, baseLv, jobLv, stats, skills, equip, options, combat]);
   const result = useMemo(() => {
     if (!engine) return null;
     try { return { s: engine.CalcStatus.compute(build, engine.D), probs: engine.CalcStatus.validate(build, engine.D) }; }
@@ -154,6 +157,7 @@ function Calculator() {
               </div>
             </section>
             <CalculatorOptions engine={engine} options={options} onChange={setOptions} />
+            <CombatOptions engine={engine} status={s} selection={combat} onChange={setCombat} />
           </div>
           <aside className="h-fit rounded-lg border border-primary/40 bg-card p-4 lg:sticky lg:top-20">
             <h2 className="text-xl font-bold">Results</h2>

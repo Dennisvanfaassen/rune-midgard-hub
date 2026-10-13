@@ -8,6 +8,8 @@ export type SktData = {
   jobs: Record<string, { inherit: string[]; tree: [string, number, [string, number][]][] }>;
 };
 export type Engine = {
+  CalcBattle: { compute: (status: any, target: any, skill: any, data: any, settings: any) => any; targetFromMob: (mob: any, data: any) => any; attackSkills: (status: any, data: any) => { id: string; name: string; lv: number }[] };
+  mobs: { key: string; name: string; lv: number; hp: number; race: string; size: string; element: string; elv: number; def: number; mdef: number }[];
   CalcStatus: {
     compute: (b: any, D: any) => any; validate: (b: any, D: any) => string[];
     BUFFS: { id: string; name: string; maxLv: number; group: string; kind: string; values?: string[] }[];
@@ -36,7 +38,7 @@ function run(src: string, req: (p: string) => unknown = () => ({})) {
 
 export function loadEngine(): Promise<Engine> {
   enginePromise ??= (async () => {
-    const [cd, sc, st, items, pets, mobs, SKT] = await Promise.all([
+    const [cd, sc, st, items, pets, mobs, SKT, battle, targets] = await Promise.all([
       import("./engine/calcdata.js.txt?raw"),
       import("./engine/calc-script.js.txt?raw"),
       import("./engine/calc-status.js.txt?raw"),
@@ -44,6 +46,8 @@ export function loadEngine(): Promise<Engine> {
       import("./data/pets.json"),
       import("./data/mobnames.json"),
       loadSkt(),
+      import("./engine/calc-battle.js.txt?raw"),
+      import("./data/mobs.json"),
     ]);
     const CALCDATA = run(cd.default);
     const CalcScript = run(sc.default);
@@ -51,7 +55,7 @@ export function loadEngine(): Promise<Engine> {
     const list = items.default as unknown as RoItem[];
     const itemsByKey = Object.fromEntries(list.map((i) => [i.key, i]));
     return {
-      CalcStatus, items: list, itemsByKey, mobNames: mobs.default as Record<string, string>,
+      CalcStatus, CalcBattle: run(battle.default), mobs: targets.default as Engine["mobs"], items: list, itemsByKey, mobNames: mobs.default as Record<string, string>,
       D: { CALCDATA, items: itemsByKey, SKT, pets: pets.default },
     };
   })();
