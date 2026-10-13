@@ -1,0 +1,3 @@
+ALTER TABLE public.gear_wishlist ADD CONSTRAINT gear_wishlist_user_fk FOREIGN KEY (user_id) REFERENCES public.profiles(id) ON DELETE CASCADE;
+ALTER TABLE public.parties ADD CONSTRAINT parties_creator_fk FOREIGN KEY (creator_id) REFERENCES public.profiles(id) ON DELETE CASCADE;
+ALTER TABLE public.party_slots ADD CONSTRAINT party_slots_user_fk FOREIGN KEY (user_id) REFERENCES public.profiles(id) ON DELETE SET NULL;

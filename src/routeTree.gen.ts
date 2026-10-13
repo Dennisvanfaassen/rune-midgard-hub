@@ -10,33 +10,141 @@
 
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
+import { Route as AuthRouteImport } from './routes/auth'
+import { Route as CalculatorRouteImport } from './routes/calculator'
+import { Route as SkillsRouteImport } from './routes/skills'
+import { Route as MembersIndexRouteImport } from './routes/members.index'
+import { Route as MembersIdRouteImport } from './routes/members.$id'
+import { Route as PartiesIndexRouteImport } from './routes/parties.index'
+import { Route as PartiesIdRouteImport } from './routes/parties.$id'
+import { Route as PartiesNewRouteImport } from './routes/parties.new'
 
 const IndexRoute = IndexRouteImport.update({
   id: '/',
   path: '/',
   getParentRoute: () => rootRouteImport,
 } as any)
+const AuthRoute = AuthRouteImport.update({
+  id: '/auth',
+  path: '/auth',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const CalculatorRoute = CalculatorRouteImport.update({
+  id: '/calculator',
+  path: '/calculator',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const SkillsRoute = SkillsRouteImport.update({
+  id: '/skills',
+  path: '/skills',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const MembersIndexRoute = MembersIndexRouteImport.update({
+  id: '/members/',
+  path: '/members/',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const MembersIdRoute = MembersIdRouteImport.update({
+  id: '/members/$id',
+  path: '/members/$id',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const PartiesIndexRoute = PartiesIndexRouteImport.update({
+  id: '/parties/',
+  path: '/parties/',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const PartiesIdRoute = PartiesIdRouteImport.update({
+  id: '/parties/$id',
+  path: '/parties/$id',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const PartiesNewRoute = PartiesNewRouteImport.update({
+  id: '/parties/new',
+  path: '/parties/new',
+  getParentRoute: () => rootRouteImport,
+} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
+  '/auth': typeof AuthRoute
+  '/calculator': typeof CalculatorRoute
+  '/skills': typeof SkillsRoute
+  '/members/$id': typeof MembersIdRoute
+  '/parties/$id': typeof PartiesIdRoute
+  '/parties/new': typeof PartiesNewRoute
+  '/members/': typeof MembersIndexRoute
+  '/parties/': typeof PartiesIndexRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
+  '/auth': typeof AuthRoute
+  '/calculator': typeof CalculatorRoute
+  '/skills': typeof SkillsRoute
+  '/members/$id': typeof MembersIdRoute
+  '/parties/$id': typeof PartiesIdRoute
+  '/parties/new': typeof PartiesNewRoute
+  '/members': typeof MembersIndexRoute
+  '/parties': typeof PartiesIndexRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
+  '/auth': typeof AuthRoute
+  '/calculator': typeof CalculatorRoute
+  '/skills': typeof SkillsRoute
+  '/members/$id': typeof MembersIdRoute
+  '/parties/$id': typeof PartiesIdRoute
+  '/parties/new': typeof PartiesNewRoute
+  '/members/': typeof MembersIndexRoute
+  '/parties/': typeof PartiesIndexRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/'
+  fullPaths:
+    | '/'
+    | '/auth'
+    | '/calculator'
+    | '/skills'
+    | '/members/$id'
+    | '/parties/$id'
+    | '/parties/new'
+    | '/members/'
+    | '/parties/'
   fileRoutesByTo: FileRoutesByTo
-  to: '/'
-  id: '__root__' | '/'
+  to:
+    | '/'
+    | '/auth'
+    | '/calculator'
+    | '/skills'
+    | '/members/$id'
+    | '/parties/$id'
+    | '/parties/new'
+    | '/members'
+    | '/parties'
+  id:
+    | '__root__'
+    | '/'
+    | '/auth'
+    | '/calculator'
+    | '/skills'
+    | '/members/$id'
+    | '/parties/$id'
+    | '/parties/new'
+    | '/members/'
+    | '/parties/'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
+  AuthRoute: typeof AuthRoute
+  CalculatorRoute: typeof CalculatorRoute
+  SkillsRoute: typeof SkillsRoute
+  MembersIdRoute: typeof MembersIdRoute
+  PartiesIdRoute: typeof PartiesIdRoute
+  PartiesNewRoute: typeof PartiesNewRoute
+  MembersIndexRoute: typeof MembersIndexRoute
+  PartiesIndexRoute: typeof PartiesIndexRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -48,11 +156,75 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof IndexRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/auth': {
+      id: '/auth'
+      path: '/auth'
+      fullPath: '/auth'
+      preLoaderRoute: typeof AuthRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/calculator': {
+      id: '/calculator'
+      path: '/calculator'
+      fullPath: '/calculator'
+      preLoaderRoute: typeof CalculatorRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/skills': {
+      id: '/skills'
+      path: '/skills'
+      fullPath: '/skills'
+      preLoaderRoute: typeof SkillsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/members/': {
+      id: '/members/'
+      path: '/members'
+      fullPath: '/members/'
+      preLoaderRoute: typeof MembersIndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/members/$id': {
+      id: '/members/$id'
+      path: '/members/$id'
+      fullPath: '/members/$id'
+      preLoaderRoute: typeof MembersIdRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/parties/': {
+      id: '/parties/'
+      path: '/parties'
+      fullPath: '/parties/'
+      preLoaderRoute: typeof PartiesIndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/parties/$id': {
+      id: '/parties/$id'
+      path: '/parties/$id'
+      fullPath: '/parties/$id'
+      preLoaderRoute: typeof PartiesIdRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/parties/new': {
+      id: '/parties/new'
+      path: '/parties/new'
+      fullPath: '/parties/new'
+      preLoaderRoute: typeof PartiesNewRouteImport
+      parentRoute: typeof rootRouteImport
+    }
   }
 }
 
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
+  AuthRoute: AuthRoute,
+  CalculatorRoute: CalculatorRoute,
+  SkillsRoute: SkillsRoute,
+  MembersIdRoute: MembersIdRoute,
+  PartiesIdRoute: PartiesIdRoute,
+  PartiesNewRoute: PartiesNewRoute,
+  MembersIndexRoute: MembersIndexRoute,
+  PartiesIndexRoute: PartiesIndexRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

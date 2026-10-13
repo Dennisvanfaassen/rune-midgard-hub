@@ -1,0 +1,665 @@
+/* calc-script.js: item effects -> Bonus (CalcScript). UMD, no DOM, no dependencies.
+ *
+ *   CalcScript.itemBonus(item, ctx)  -> { bonus, source: "ep8"|"rathena"|"none", applied: [text], notCalculated: [text] }
+ *   CalcScript.itemBonusFrom(item, ctx, source)   force a source ("ep8" | "rathena" | "none")
+ *   CalcScript.runScript(raScript, ctx) -> { bonus, applied, notCalculated }   (item scripts and combo scripts)
+ *   CalcScript.emptyBonus() / CalcScript.addBonus(target, src)
+ *   CalcScript.pickSource(item)      -> "ep8" | "rathena" | "none"   (Ep 8 first, rAthena fallback)
+ *
+ * ctx (every field optional, sane defaults):
+ *   { refine, baseLv, jobLv, job (calculator job key, Novice .. Supernovice), baseStats: {str,agi,vit,int,dex,luk},
+ *     skillLv(skillId) -> n, isEquipped(itemKey) -> bool (scripts pass numeric item ids: they are mapped to keys through
+ *     itemById when given, and passed through unchanged otherwise), refineOf("EQI_GARMENT") -> n,
+ *     equipIdOf("EQI_HAND_R") -> numeric item id | 0, hand: "right"|"left"|null (reserved: weapon-scoped placement is
+ *     done by calc-status from the per-item Bonus),
+ *     mobByMid?: {mid: mob}      bAddDamageClass: mob id -> mob (key, name); unknown ids are kept as key "#id"
+ *     itemById?(id) -> item      lets getiteminfo(getequipid(..), ITEMINFO_VIEW) see the weapon type of an equipped id }
+ *   readparam(bStr..bLuk) reads ctx.baseStats (allocated base stats, without item bonuses).
+ *
+ * Bonus = the spec Bonus plus these extra fields (all additive unless noted):
+ *   matk          flat MATK (bMatk)
+ *   skillCast     {SKILL_ID: %}  bonus2 bCastrate,"SKILL",n
+ *   subLong       % less damage from ranged attacks (bLongAtkDef; Ep 8 SubRangeAttackDamage). Negative = more.
+ *   critLong      Critical (display units) with ranged attacks only (bCriticalLong, e.g. Incisive Arrow)
+ *   defRate, def2Rate   % change of hard DEF / soft (VIT) DEF as a delta on 100 (bDefRate -67 -> DEF x 0.33, min 0).
+ *                 Ep 8 ModifyDEF_Fraction a b is mapped to round(-100 * (1 - a / b)) on both.
+ * itemBonus never adds the item's own base stats (atk, def, mdef, element, weapon type): calc-status reads those from the item.
+ * Special case: with source "rathena", `bonus bMdef` is skipped when the item has its own Ep 8 `mdef` field (not fromRA),
+ * because rAthena scripts encode the item MDEF that way.
+ *   addRace2, subRace2, magicAddRace2   {GroupName: %}  monster race groups (RC2_*: Goblin, Kobold, Orc, Golem, ...), names = CALCDATA.race2.names.
+ *                 bAddRace2 / bSubRace2 / bMagicAddRace2 accept the numeric id (3) or the RC2_ constant (RC2_Orc). Player-wide (addRace2 lives in
+ *                 the right-hand bucket in rAthena, see calc-battle). No Ep 8 Aegis command maps to a race group.
+ * Value conventions: addRace/addEle/addSize/addClass/magicAdd*: percent. subRace/subEle/subSize/subClass: percent
+ * resistance (positive = takes less damage, negative = takes more). ignoreDef*: true. ignoreMdef*: percent ignored.
+ * defRatioAtk*: true. Mob races use the data names (Demi-Human ...), plus "All". Player-only races (RC_Player_*) are skipped.
+ * atkEle of an Ammunition item is the arrow element (calc-status decides what to do with it).
+ */
+(function (root, f) { const m = f(); if (typeof module === 'object' && module.exports) module.exports = m; else root.CalcScript = m; })(typeof self !== 'undefined' ? self : this, function () {
+'use strict';
+
+/* ---------- Bonus ---------- */
+const NUMF = ['str', 'agi', 'vit', 'int', 'dex', 'luk', 'allStats', 'maxhp', 'maxsp', 'maxhpRate', 'maxspRate', 'batk', 'watk', 'watk2', 'matk', 'def', 'mdef', 'hit', 'flee', 'flee2', 'cri', 'critLong',
+  'atkRate', 'matkRate', 'aspdRate', 'castRate', 'delayRate', 'hitRate', 'fleeRate', 'critAtkRate', 'longAtkRate', 'hpRegenRate', 'spRegenRate', 'useSpRate', 'aspd', 'defRate', 'def2Rate', 'subLong'];
+const MAPF = ['addRace', 'addEle', 'addSize', 'addClass', 'magicAddRace', 'magicAddEle', 'magicAddClass', 'subRace', 'subEle', 'subSize', 'subClass', 'critAddRace', 'addMob', 'skillAtk', 'skillCast',
+  'ignoreDefRace', 'ignoreDefClass', 'ignoreMdefRace', 'ignoreMdefClass', 'defRatioAtkRace', 'defRatioAtkClass', 'addRace2', 'subRace2', 'magicAddRace2'];
+const BOOLF = ['noSizeFix', 'noCastCancel', 'noGemstone'];
+const emptyBonus = () => {
+  const b = {};
+  for (const k of NUMF) b[k] = 0;
+  for (const k of MAPF) b[k] = {};
+  for (const k of BOOLF) b[k] = false;
+  b.atkEle = null; b.defEle = null; b.grantSkills = []; b.textOnly = [];
+  return b;
+};
+function addBonus(t, s) {
+  for (const k of NUMF) t[k] += s[k] || 0;
+  for (const k of MAPF) { const m = s[k]; if (!m) continue; const d = t[k]; for (const x in m) d[x] = typeof m[x] === 'boolean' ? !!(d[x] || m[x]) : (d[x] || 0) + m[x]; }
+  for (const k of BOOLF) t[k] = !!(t[k] || s[k]);
+  if (s.atkEle) t.atkEle = s.atkEle;
+  if (s.defEle) t.defEle = s.defEle;
+  if (s.grantSkills) t.grantSkills.push(...s.grantSkills);
+  if (s.textOnly) t.textOnly.push(...s.textOnly);
+  return t;
+}
+
+/* ---------- names ---------- */
+const ELE = ['Neutral', 'Water', 'Earth', 'Fire', 'Wind', 'Poison', 'Holy', 'Dark', 'Ghost', 'Undead'];
+const RACE = ['Formless', 'Undead', 'Brute', 'Plant', 'Insect', 'Fish', 'Demon', 'Demi-Human', 'Angel', 'Dragon'];
+const SIZE = ['Small', 'Medium', 'Large'];
+const CLS = ['Normal', 'Boss', 'Boss', 'All'];                         // CLASS_Guardian counts as boss
+// Monster race groups, enum e_race2 (map.hpp): index = RC2 id. Same names as CALCDATA.race2.names (a test keeps both in sync).
+const RC2 = ['None', 'Goblin', 'Kobold', 'Orc', 'Golem', 'Guardian', 'Ninja', 'GvG', 'Battlefield', 'Treasure', 'Biolab', 'Manuk', 'Splendide', 'Scaraba', 'OGH ATK DEF', 'OGH Hidden',
+  'Bio5 Swordman Thief', 'Bio5 Acolyte Merchant', 'Bio5 Mage Archer', 'Bio5 MVP', 'Clocktower', 'Thanatos', 'Faceworm', 'Hearthunter', 'Rockridge', 'Werner Lab', 'Temple Demon', 'Illusion Vampire',
+  'Malangdo', 'Ep172alpha', 'Ep172beta', 'Ep172bath', 'Illusion Turtle', 'Rachel Sanctuary', 'Illusion Luanda', 'Illusion Frozen', 'Illusion Moonlight', 'Ep16 DEF', 'Edda Arunafeltz', 'Lasagna',
+  'Glast Heim Abyss', 'Destroyed Valkyrie Realm', 'Encroached Gephenia'];
+const raceOf = n => n === 12 ? 'All' : RACE[n];
+const eleOf = n => n === 10 ? 'All' : ELE[n];
+const sizeOf = n => n === 3 ? 'All' : SIZE[n];
+const clsOf = n => CLS[n];
+const RACEN = {RACE_Human: 'Demi-Human', RACE_Animal: 'Brute', RACE_Nothing: 'Formless', RACE_Plant: 'Plant', RACE_Demon: 'Demon', RACE_Undead: 'Undead', RACE_Insect: 'Insect', RACE_Dragon: 'Dragon', RACE_Fish: 'Fish', RACE_Angel: 'Angel'};
+const PROPN = {PROPERTY_Nothing: 'Neutral', PROPERTY_Ground: 'Earth', PROPERTY_Wind: 'Wind', PROPERTY_Water: 'Water', PROPERTY_Fire: 'Fire', PROPERTY_Telekinesis: 'Ghost', PROPERTY_Undead: 'Undead', PROPERTY_Darkness: 'Dark', PROPERTY_Saint: 'Holy', PROPERTY_Poison: 'Poison'};
+const STATEN = {HEALTHBlind: 'Blind', BODYFreezing: 'Freeze', BODYStun: 'Stun', BODYSleep: 'Sleep', BODYStoneCurse: 'Stone Curse', HEALTHSilence: 'Silence', HEALTHPoison: 'Poison', HEALTHCurse: 'Curse', HEALTHConfusion: 'Confusion', EFFECTEndure: 'Endure', EFFECTHaste: 'Increase AGI', EFFECTHasteAttack: 'Adrenaline Rush'};
+const EFN = {eff_stun: 'Stun', eff_sleep: 'Sleep', eff_poison: 'Poison', eff_blind: 'Blind', eff_silence: 'Silence', eff_curse: 'Curse', eff_stone: 'Stone Curse', eff_freeze: 'Freeze', eff_confusion: 'Confusion', eff_bleeding: 'Bleeding', eff_dpoison: 'Deadly Poison', eff_crystalize: 'Crystalize', eff_burning: 'Burning'};
+const SKILLNAMES = {AC_CHARGEARROW:'Charge Arrow',AC_DOUBLE:'Double Strafe',AC_SHOWER:'Arrow Shower',AL_DECAGI:'Decrease AGI',AL_HEAL:'Heal',AL_INCAGI:'Increase AGI',AL_PNEUMA:'Pneuma',AL_TELEPORT:'Teleport',AM_ACIDTERROR:'Acid Terror',AM_DEMONSTRATION:'Demonstration',AM_POTIONPITCHER:'Potion Pitcher',AS_CLOAKING:'Cloaking',AS_GRIMTOOTH:'Grimtooth',AS_SONICBLOW:'Sonic Blow',AS_VENOMDUST:'Venom Dust',BS_ADRENALINE:'Adrenaline Rush',BS_HAMMERFALL:'Hammer Fall',BS_MAXIMIZE:'Maximize Power',CR_AUTOGUARD:'Auto Guard',CR_GRANDCROSS:'Grand Cross',CR_REFLECTSHIELD:'Reflect Shield',CR_SHIELDCHARGE:'Shield Charge',HT_ANKLESNARE:'Ankle Snare',HT_CLAYMORETRAP:'Claymore Trap',HT_FLASHER:'Flasher',HT_FREEZINGTRAP:'Freezing Trap',HT_SANDMAN:'Sandman',HT_SHOCKWAVE:'Shockwave Trap',HT_SKIDTRAP:'Skid Trap',KN_AUTOCOUNTER:'Auto Counter',KN_BRANDISHSPEAR:'Brandish Spear',KN_PIERCE:'Pierce',KN_SPEARBOOMERANG:'Spear Boomerang',KN_SPEARSTAB:'Spear Stab',KN_TWOHANDQUICKEN:'Two-Hand Quicken',MC_MAMMONITE:'Mammonite',MG_COLDBOLT:'Cold Bolt',MG_FIREBALL:'Fire Ball',MG_FIREBOLT:'Fire Bolt',MG_FIREWALL:'Fire Wall',MG_FROSTDIVER:'Frost Diver',MG_LIGHTNINGBOLT:'Lightning Bolt',MG_SAFETYWALL:'Safety Wall',MG_SIGHT:'Sight',MG_SOULSTRIKE:'Soul Strike',MG_STONECURSE:'Stone Curse',MG_THUNDERSTORM:'Thunder Storm',MO_BODYRELOCATION:'Body Relocation',NPC_AGIUP:'AGI Up',NPC_ARMORBRAKE:'Armor Break',NPC_ATTRICHANGE:'Attribute Change',NPC_BARRIER:'Barrier',NPC_BLINDATTACK:'Blind Attack',NPC_BLOODDRAIN:'Blood Drain',NPC_CALLSLAVE:'Call Slave',NPC_CHANGEFIRE:'Change to Fire',NPC_CHANGETELEKINESIS:'Change to Ghost',NPC_CHANGEUNDEAD:'Change to Undead',NPC_COMBOATTACK:'Combo Attack',NPC_CRITICALSLASH:'Critical Slash',NPC_CURSEATTACK:'Curse Attack',NPC_DARKBLESSING:'Dark Blessing',NPC_DARKBREATH:'Dark Breath',NPC_DARKNESSATTACK:'Dark Attack',NPC_DARKSTRIKE:'Dark Strike',NPC_DARKTHUNDER:'Dark Thunder',NPC_DEFENDER:'Defender',NPC_EMOTION:'Emotion',NPC_EMOTION_ON:'Emotion (aggressive)',NPC_ENERGYDRAIN:'Energy Drain',NPC_FIREATTACK:'Fire Attack',NPC_GRANDDARKNESS:'Grand Darkness',NPC_GROUNDATTACK:'Earth Attack',NPC_GUIDEDATTACK:'Guided Attack',NPC_HALLUCINATION:'Hallucination',NPC_HELMBRAKE:'Helm Break',NPC_HOLYATTACK:'Holy Attack',NPC_INVISIBLE:'Invisible',NPC_KEEPING:'Keeping',NPC_LICK:'Lick',NPC_MAGICALATTACK:'Magical Attack',NPC_MENTALBREAKER:'Mental Breaker',NPC_METAMORPHOSIS:'Metamorphosis',NPC_PETRIFYATTACK:'Petrify Attack',NPC_PIERCINGATT:'Piercing Attack',NPC_POISON:'Poison',NPC_POISONATTACK:'Poison Attack',NPC_POWERUP:'Power Up',NPC_PROVOCATION:'Provocation',NPC_RANDOMATTACK:'Random Attack',NPC_RANDOMMOVE:'Random Move',NPC_RANGEATTACK:'Range Attack',NPC_REBIRTH:'Rebirth',NPC_REVENGE:'Revenge',NPC_RUN:'Run',NPC_SELFDESTRUCTION:'Self Destruction',NPC_SHIELDBRAKE:'Shield Break',NPC_SILENCEATTACK:'Silence Attack',NPC_SLEEPATTACK:'Sleep Attack',NPC_SMOKING:'Smoking',NPC_SPEEDUP:'Speed Up',NPC_SPLASHATTACK:'Splash Attack',NPC_STOP:'Stop',NPC_STUNATTACK:'Stun Attack',NPC_SUICIDE:'Suicide',NPC_SUMMONMONSTER:'Summon Monster',NPC_SUMMONSLAVE:'Summon Slave',NPC_TELEKINESISATTACK:'Ghost Attack',NPC_UNDEADATTACK:'Undead Attack',NPC_WATERATTACK:'Water Attack',NPC_WEAPONBRAKER:'Weapon Break',NPC_WINDATTACK:'Wind Attack',PR_LEXAETERNA:'Lex Aeterna',PR_LEXDIVINA:'Lex Divina',PR_SANCTUARY:'Sanctuary',PR_STRECOVERY:'Status Recovery',RG_INTIMIDATE:'Intimidate',RG_STRIPARMOR:'Strip Armor',RG_STRIPHELM:'Strip Helm',RG_STRIPSHIELD:'Strip Shield',RG_STRIPWEAPON:'Strip Weapon',SA_DISPELL:'Dispell',SA_REVERSEORCISH:'Reverse Orcish',SM_BASH:'Bash',SM_ENDURE:'Endure',SM_MAGNUM:'Magnum Break',SM_PROVOKE:'Provoke',SM_SELFPROVOKE:'Provoke (self)',TF_BACKSLIDING:'Back Slide',TF_HIDING:'Hiding',TF_POISON:'Envenom',TF_SPRINKLESAND:'Sand Attack',TF_THROWSTONE:'Stone Fling',TF_DOUBLE:'Double Attack',WZ_EARTHSPIKE:'Earth Spike',WZ_FIREPILLAR:'Fire Pillar',WZ_HEAVENDRIVE:'Heaven\'s Drive',WZ_JUPITEL:'Jupitel Thunder',WZ_METEOR:'Meteor Storm',WZ_QUAGMIRE:'Quagmire',WZ_SIGHTRASHER:'Sightrasher',WZ_STORMGUST:'Storm Gust',WZ_VERMILION:'Lord of Vermilion',WZ_WATERBALL:'Water Ball',ALL_RESURRECTION:'Resurrection',MC_IDENTIFY:'Item Appraisal',SA_AUTOSPELL:'Autospell',SM_RECOVERY:'Increase HP Recovery',MG_ENERGYCOAT:'Energy Coat',SM_TWOHAND:'Two-Handed Sword Mastery',CR_DEVOTION:'Devotion',MC_VENDING:'Vending',SM_SWORD:'Sword Mastery',KN_SPEARMASTERY:'Spear Mastery',MC_DISCOUNT:'Discount',MC_OVERCHARGE:'Overcharge',AL_ANGELUS:'Angelus',WZ_ICEWALL:'Ice Wall',MG_NAPALMBEAT:'Napalm Beat',TF_STEAL:'Steal',HT_DETECTING:'Detect',ST_CHASEWALK:'Chase Walk'};
+const SKN2 = {"NPC_DRAGONFEAR":"Dragon Fear", "NPC_WIDEBLEEDING":"Wide Bleeding", "ITM_TOMAHAWK":"Throw Tomahawk", "TF_DETOXIFY":"Detoxify", "LK_JOINTBEAT":"Vital Strike", "PR_TURNUNDEAD":"Turn Undead", "AL_CRUCIS":"Signum Crucis", "AL_BLESSING":"Blessing", "NPC_HELLJUDGEMENT":"Hell's Judgement", "GM_SANDMAN":"GM Sandman", "NPC_WIDECURSE":"Wide Curse", "AL_HOLYLIGHT":"Holy Light", "PR_MAGNUS":"Magnus Exorcismus", "AL_CURE":"Cure", "SN_SHARPSHOOTING":"Focused Arrow Strike", "SA_FROSTWEAPON":"Endow Tsunami", "SA_SEISMICWEAPON":"Endow Quake", "CG_ARROWVULCAN":"Vulcan Arrow", "BA_MUSICALSTRIKE":"Melody Strike", "DC_THROWARROW":"Slinging Arrow", "HW_MAGICPOWER":"Mystical Amplification", "NPC_MAGICMIRROR":"Magic Mirror", "PA_SHIELDCHAIN":"Shield Chain", "CR_SHIELDBOOMERANG":"Shield Boomerang", "CR_FULLPROTECTION":"Full Protection", "WZ_ESTIMATION":"Sense", "ST_FULLSTRIP":"Divest All", "NPC_STONESKIN":"Stone Skin", "NPC_ANTIMAGIC":"Anti Magic", "WE_MALE":"I Will Protect You", "WE_FEMALE":"I Look up to You", "WE_CALLPARTNER":"I miss You", "CH_SOULCOLLECT":"Zen", "MO_EXPLOSIONSPIRITS":"Fury", "PA_PRESSURE":"Gloria Domini", "KN_BOWLINGBASH":"Bowling Bash", "AS_SPLASHER":"Venom Splasher", "HP_ASSUMPTIO":"Assumptio", "CG_TAROTCARD":"Tarot Card of Fate", "TF_PICKSTONE":"Find Stone", "BS_GREED":"Greed", "TK_RUN":"Running", "TK_HIGHJUMP":"Taekwon Jump", "NV_FIRSTAID":"First Aid", "NPC_CRITICALWOUND":"Critical Wounds", "PR_GLORIA":"Gloria", "BA_FROSTJOKER":"Unbarring Octave", "AC_CONCENTRATION":"Improve Concentration", "PR_KYRIE":"Kyrie Eleison", "PR_IMPOSITIO":"Impositio Manus", "MO_CALLSPIRITS":"Summon Spirit Sphere", "WZ_FROSTNOVA":"Frost Nova", "SA_CASTCANCEL":"Cast Cancel", "SA_SPELLBREAKER":"Spell Breaker", "HW_NAPALMVULCAN":"Napalm Vulcan", "DC_WINKCHARM":"Wink of Charm", "NPC_EARTHQUAKE":"Earthquake", "ITEM_ENCHANTARMS":"Weapon Enchantment", "GS_SPREADATTACK":"Spread Attack", "NJ_HUUJIN":"Wind Blade", "MO_EXTREMITYFIST":"Asura Strike", "MO_INVESTIGATE":"Occult Impaction", "ASC_METEORASSAULT":"Meteor Assault", "RG_BACKSTAP":"Back Stab", "BS_WEAPONPERFECT":"Weapon Perfection", "PA_SACRIFICE":"Martyr's Reckoning"};                                  // names for skills used by item scripts (rAthena skill_db Description)
+const SKID = {47: 'AC_SHOWER', 52: 'TF_POISON', 62: 'KN_BOWLINGBASH'};                // numeric skill ids seen in rAthena item scripts
+const skId = v => typeof v === 'number' ? (SKID[v] || '#' + v) : String(v).trim().toUpperCase();
+const skName = v => { const id = skId(v); return SKILLNAMES[id] || SKN2[id] || (id[0] === '#' ? 'skill ' + id : id.replace(/^[A-Z]+_/, '').toLowerCase().replace(/\b\w/g, c => c.toUpperCase())); };
+const nm = (t, x) => t[x] || String(x).replace(/^(RACE_|PROPERTY_|HEALTH|BODY|EFFECT)/, '');
+const effName = v => EFN[String(v).toLowerCase()] || String(v).replace(/^eff_/i, '');
+const groupName = (kind, x) => kind === 'class' ? (x === 'Boss' ? 'boss monsters' : x === 'Normal' ? 'normal monsters' : 'all monsters') : x === 'All' ? 'all ' + (kind === 'race' ? 'races' : kind === 'element' ? 'elements' : 'sizes') : kind === 'race' ? x : kind === 'element' ? x + ' element' : x + ' size';
+const pc = n => +(+n).toFixed(2);
+const sg = n => (n < 0 ? '-' : '+') + pc(Math.abs(n));
+const oneLine = s => s.replace(/\s+/g, ' ').trim();
+
+/* ---------- script constants (lower-case keys; rAthena script constants are case-insensitive) ---------- */
+const K = {};
+['formless', 'undead', 'brute', 'plant', 'insect', 'fish', 'demon', 'demihuman', 'angel', 'dragon', 'player_human', 'player_doram', 'all'].forEach((n, i) => { K['rc_' + n] = i; });
+K.rc_player = 10;
+RC2.forEach((n, i) => { K['rc2_' + n.toLowerCase().replace(/ /g, '_')] = i; });
+['neutral', 'water', 'earth', 'fire', 'wind', 'poison', 'holy', 'dark', 'ghost', 'undead', 'all'].forEach((n, i) => { K['ele_' + n] = i; });
+['small', 'medium', 'large', 'all'].forEach((n, i) => { K['size_' + n] = i; });
+['normal', 'boss', 'guardian', 'all'].forEach((n, i) => { K['class_' + n] = i; });
+['short', 'long', 'weapon', 'magic', 'misc', 'normal', 'skill'].forEach((n, i) => { K['bf_' + n] = 1 << i; });
+['self', 'target', 'short', 'long', 'skill', 'weapon', 'magic', 'misc'].forEach((n, i) => { K['atf_' + n] = 1 << i; });
+['fist', 'dagger', '1hsword', '2hsword', '1hspear', '2hspear', '1haxe', '2haxe', 'mace', '2hmace', 'staff', 'bow', 'knuckle', 'musical', 'whip', 'book', 'katar'].forEach((n, i) => { K['w_' + n] = i; });
+['buyprice', 'sellprice', 'type', 'maxchance', 'sex', 'locations', 'weight', 'attack', 'defense', 'range', 'slot', 'view'].forEach((n, i) => { K['iteminfo_' + n] = i; });
+const JOBID = {Novice: 0, Swordman: 1, Mage: 2, Archer: 3, Acolyte: 4, Merchant: 5, Thief: 6, Knight: 7, Priest: 8, Wizard: 9, Blacksmith: 10, Hunter: 11, Assassin: 12, Knight2: 13, Crusader: 14, Monk: 15, Sage: 16, Rogue: 17,
+  Alchemist: 18, Bard: 19, Dancer: 20, Crusader2: 21, Wedding: 22, Super_Novice: 23, SuperNovice: 23, Gunslinger: 24, Ninja: 25, Xmas: 26, Summer: 27, Hanbok: 28, Oktoberfest: 29, Summer2: 30,
+  Novice_High: 4001, Swordman_High: 4002, Mage_High: 4003, Archer_High: 4004, Acolyte_High: 4005, Merchant_High: 4006, Thief_High: 4007, Lord_Knight: 4008, High_Priest: 4009, High_Wizard: 4010, Whitesmith: 4011,
+  Sniper: 4012, Assassin_Cross: 4013, Paladin: 4015, Champion: 4016, Professor: 4017, Stalker: 4018, Creator: 4019, Clown: 4020, Gypsy: 4021, Baby: 4023, Taekwon: 4046, Star_Gladiator: 4047, Soul_Linker: 4049};
+for (const k in JOBID) K['job_' + k.toLowerCase()] = JOBID[k];
+const CALCJOB = {Supernovice: 'Super_Novice'};                         // calculator job key -> JOBID key
+const jobId = j => JOBID[CALCJOB[j] || j] ?? 0;
+const BASECLASS = {Knight: 1, Crusader: 1, Wizard: 2, Sage: 2, Hunter: 3, Bard: 3, Dancer: 3, Priest: 4, Monk: 4, Blacksmith: 5, Alchemist: 5, Assassin: 6, Rogue: 6};
+const baseClassId = j => BASECLASS[j] ?? (jobId(j) <= 6 ? jobId(j) : 0);   // Novice/Super Novice -> Novice
+// eaclass(): MAPID_* style ids (first class = 1st job id, second class = 0x100 | first class, Super Novice 0x100)
+const EAJL_2_1 = 0x100, EAJL_2_2 = 0x200;
+const EAJ = {novice: 0, swordman: 1, mage: 2, archer: 3, acolyte: 4, merchant: 5, thief: 6, knight: 1 | EAJL_2_1, priest: 4 | EAJL_2_1, wizard: 2 | EAJL_2_1, blacksmith: 5 | EAJL_2_1, hunter: 3 | EAJL_2_1, assassin: 6 | EAJL_2_1,
+  crusader: 1 | EAJL_2_2, monk: 4 | EAJL_2_2, sage: 2 | EAJL_2_2, rogue: 6 | EAJL_2_2, alchemist: 5 | EAJL_2_2, bard: 3 | EAJL_2_2, dancer: 3 | EAJL_2_2, super_novice: 0 | EAJL_2_1};
+for (const k in EAJ) K['eaj_' + k] = EAJ[k];
+K.eajl_2_1 = EAJL_2_1; K.eajl_2_2 = EAJL_2_2; K.eajl_2 = 0x300; K.eajl_upper = 0x1000; K.eajl_baby = 0x2000; K.eajl_third = 0x4000;
+K.eaj_basemask = 0xff; K.eaj_upper = 0x1000;
+const WTYPE = {'Dagger': 1, 'One-handed Sword': 2, 'Two-handed Sword': 3, 'One-handed Spear': 4, 'Two-handed Spear': 5, 'One-handed Axe': 6, 'Two-handed Axe': 7, 'Mace': 8, 'Staff': 10, 'Bow': 11, 'Knuckle': 12, 'Musical Instrument': 13, 'Whip': 14, 'Book': 15, 'Katar': 16};
+
+/* ---------- tokenizer + parser ---------- */
+class Err extends Error {}
+class Unk extends Error {}
+function tokenize(src) {
+  const t = [], n = src.length, idRe = /[A-Za-z_@.$#][\w@.$#]*/y, numRe = /0[xX][0-9a-fA-F]+|\d+/y;
+  let i = 0;
+  while (i < n) {
+    const c = src[i];
+    if (/\s/.test(c)) { i++; continue; }
+    if (c === '/' && src[i + 1] === '/') { while (i < n && src[i] !== '\n') i++; continue; }
+    if (c === '/' && src[i + 1] === '*') { const e = src.indexOf('*/', i + 2); i = e < 0 ? n : e + 2; continue; }
+    const s = i;
+    if (c === '"') {
+      let v = ''; i++;
+      while (i < n && src[i] !== '"') { if (src[i] === '\\' && i + 1 < n) { i++; v += src[i] === 'n' ? '\n' : src[i]; } else v += src[i]; i++; }
+      i++; t.push({t: 'str', v, s, e: i}); continue;
+    }
+    if (c >= '0' && c <= '9') { numRe.lastIndex = i; const m = numRe.exec(src); i += m[0].length; t.push({t: 'num', v: Number(m[0]), s, e: i}); continue; }
+    idRe.lastIndex = i;
+    const m = idRe.exec(src);
+    if (m) { i += m[0].length; t.push({t: 'id', v: m[0], s, e: i}); continue; }
+    const two = src.substr(i, 2);
+    if (['<=', '>=', '==', '!=', '&&', '||', '<<', '>>', '+=', '-=', '*=', '/=', '%='].includes(two)) { i += 2; t.push({t: 'op', v: two, s, e: i}); continue; }
+    i++; t.push({t: 'op', v: c, s, e: i});
+  }
+  return t;
+}
+const BINP = {'||': 1, '&&': 2, '|': 3, '^': 4, '&': 5, '==': 6, '!=': 6, '<': 7, '>': 7, '<=': 7, '>=': 7, '<<': 8, '>>': 8, '+': 9, '-': 9, '*': 10, '/': 10, '%': 10};
+const parseCache = new Map();
+function parse(src) {
+  if (parseCache.has(src)) return parseCache.get(src);
+  const toks = tokenize(src); let p = 0;
+  const isOp = v => p < toks.length && toks[p].t === 'op' && toks[p].v === v;
+  const expectOp = v => { if (!isOp(v)) throw new Err('expected ' + v); p++; };
+  const rawFrom = si => oneLine(src.slice(toks[si].s, toks[Math.max(si, p - 1)].e)).replace(/\s*;$/, '');
+  function primary() {
+    const t = toks[p++];
+    if (!t) throw new Err('unexpected end');
+    if (t.t === 'num') return {n: 'num', v: t.v};
+    if (t.t === 'str') return {n: 'str', v: t.v};
+    if (t.t === 'op' && t.v === '(') { const e = expr(); expectOp(')'); return e; }
+    if (t.t === 'id') {
+      if (isOp('(')) { p++; const args = []; if (!isOp(')')) { args.push(expr()); while (isOp(',')) { p++; args.push(expr()); } } expectOp(')'); return {n: 'call', name: t.v, args}; }
+      return {n: 'id', name: t.v};
+    }
+    throw new Err('unexpected ' + t.v);
+  }
+  function unary() {
+    const t = toks[p];
+    if (t && t.t === 'op' && (t.v === '!' || t.v === '-' || t.v === '+' || t.v === '~')) { p++; return {n: 'un', op: t.v, a: unary()}; }
+    return primary();
+  }
+  function bin(min) {
+    let l = unary();
+    for (;;) {
+      const t = toks[p], pr = t && t.t === 'op' && BINP[t.v];
+      if (!pr || pr < min) return l;
+      p++; l = {n: 'bin', op: t.v, a: l, b: bin(pr + 1)};
+    }
+  }
+  function expr() {
+    const c = bin(1);
+    if (isOp('?')) { p++; const a = expr(); expectOp(':'); return {n: 'tern', c, a, b: expr()}; }
+    return c;
+  }
+  function endStmt() { if (isOp(';')) p++; else if (p < toks.length && !isOp('}')) throw new Err('expected ;'); }
+  function stmt() {
+    if (p >= toks.length) return null;
+    const si = p, t = toks[p];
+    try {
+      if (t.t === 'op') {
+        if (t.v === '{') { p++; const body = []; while (p < toks.length && !isOp('}')) { const s = stmt(); if (s) body.push(s); } p++; return {k: 'block', body}; }
+        if (t.v === ';') { p++; return null; }
+        throw new Err('unexpected ' + t.v);
+      }
+      if (t.t !== 'id') throw new Err('unexpected token');
+      const lc = t.v.toLowerCase();
+      if (lc === 'if') {
+        p++; expectOp('('); const a = p, cond = expr(), b = p - 1; expectOp(')');
+        const raw = 'if (' + oneLine(src.slice(toks[a].s, toks[b].e)) + ')';
+        const then = stmt(); let els = null;
+        if (p < toks.length && toks[p].t === 'id' && toks[p].v.toLowerCase() === 'else') { p++; els = stmt(); }
+        return {k: 'if', cond, raw, then, else: els};
+      }
+      if (lc === 'else') throw new Err('stray else');
+      p++;
+      if (p < toks.length && toks[p].t === 'op' && ['=', '+=', '-=', '*=', '/=', '%='].includes(toks[p].v)) {
+        const op = toks[p++].v, e = expr(); endStmt();
+        return {k: 'assign', name: t.v, op, e, raw: rawFrom(si)};
+      }
+      const args = [];
+      if (isOp('(')) { p++; if (!isOp(')')) { args.push(expr()); while (isOp(',')) { p++; args.push(expr()); } } expectOp(')'); }
+      else if (!isOp(';') && p < toks.length && !isOp('}')) { args.push(expr()); while (isOp(',')) { p++; args.push(expr()); } }
+      endStmt();
+      return {k: 'cmd', name: t.v, args, raw: rawFrom(si)};
+    } catch (e) {
+      if (!(e instanceof Err)) throw e;
+      if (p <= si) p = si + 1;
+      let depth = 0;
+      while (p < toks.length) {
+        const x = toks[p];
+        if (x.t === 'op' && x.v === '{') depth++;
+        else if (x.t === 'op' && x.v === '}') { if (depth === 0) break; depth--; }
+        else if (x.t === 'op' && x.v === ';' && depth === 0) { p++; break; }
+        p++;
+      }
+      return {k: 'bad', raw: rawFrom(si)};
+    }
+  }
+  const out = [];
+  while (p < toks.length) { const s = stmt(); if (s) out.push(s); if (p < toks.length && isOp('}')) p++; }
+  parseCache.set(src, out);
+  return out;
+}
+
+/* ---------- ctx + evaluator ---------- */
+function isEq(c) {
+  const f = c.isEquipped;
+  if (!f) return () => false;
+  return id => { const it = typeof id === 'number' && c.itemById ? c.itemById(id) : null; return !!(f(id) || (it && it.key && f(it.key))); };
+}
+function mkCtx(c) {
+  c = c || {};
+  const s = c.baseStats || {};
+  return {refine: c.refine | 0, baseLv: c.baseLv || 99, jobLv: c.jobLv || 50, job: c.job || 'Novice',
+    baseStats: {str: s.str ?? 1, agi: s.agi ?? 1, vit: s.vit ?? 1, int: s.int ?? 1, dex: s.dex ?? 1, luk: s.luk ?? 1},
+    skillLv: c.skillLv || (() => 0), isEquipped: isEq(c), refineOf: c.refineOf || (() => 0), equipIdOf: c.equipIdOf || (() => 0),
+    itemById: c.itemById || null, hand: c.hand || null, mobByMid: c.mobByMid || null};
+}
+const evNum = x => { if (typeof x !== 'number' || x !== x) throw new Unk('number expected'); return x; };
+function evId(name, env) {
+  const lc = name.toLowerCase(), c = env.ctx;
+  if (/^[.@$#]/.test(name)) return lc in env.vars ? env.vars[lc] : 0;
+  switch (lc) {
+    case 'baselevel': return c.baseLv;
+    case 'joblevel': return c.jobLv;
+    case 'class': return jobId(c.job);
+    case 'basejob': return jobId(c.job);
+    case 'baseclass': return baseClassId(c.job);
+    case 'upper': return 0;
+    case 'str': case 'agi': case 'vit': case 'int': case 'dex': case 'luk': return c.baseStats[lc];
+    case 'true': return 1;
+    case 'false': return 0;
+  }
+  if (lc in K) return K[lc];
+  if (lc.startsWith('eqi_')) return name.toUpperCase();
+  if (/^(eff_|ig_|rc2_|sc_)/.test(lc)) return name;
+  throw new Unk(name);
+}
+function evCall(n, env) {
+  const lc = n.name.toLowerCase(), c = env.ctx, a = n.args, v = () => a.map(x => ev(x, env));
+  switch (lc) {
+    case 'getrefine': return c.refine;
+    case 'readparam': {
+      const x = a[0] && a[0].n === 'id' ? a[0].name.toLowerCase() : null;
+      if (x === 'bstr' || x === 'bagi' || x === 'bvit' || x === 'bint' || x === 'bdex' || x === 'bluk') return c.baseStats[x.slice(1)];
+      if (x === 'bbaselevel') return c.baseLv;
+      if (x === 'bjoblevel') return c.jobLv;
+      throw new Unk('readparam');
+    }
+    case 'getskilllv': { const s = ev(a[0], env); return c.skillLv(skId(s)) | 0; }
+    case 'isequipped': return v().every(id => !!c.isEquipped(id)) ? 1 : 0;
+    case 'isequippedcnt': return v().filter(id => !!c.isEquipped(id)).length;
+    case 'getequiprefinerycnt': return c.refineOf(ev(a[0], env)) | 0;
+    case 'getequipid': return c.equipIdOf(ev(a[0], env)) | 0;
+    case 'getiteminfo': {
+      const [id, what] = v();
+      if (what !== K.iteminfo_view) throw new Unk('getiteminfo');
+      const it = id > 0 && c.itemById ? c.itemById(id) : null;
+      if (id > 0 && !c.itemById) throw new Unk('getiteminfo');
+      return it && it.type === 'Weapon' ? (WTYPE[it.sub] ?? -1) : -1;
+    }
+    case 'eaclass': { const j = c.job === 'Supernovice' ? 'super_novice' : c.job.toLowerCase(); return EAJ[j] ?? 0; }
+    case 'min': return Math.min(...v().map(evNum));
+    case 'max': return Math.max(...v().map(evNum));
+    case 'abs': return Math.abs(evNum(v()[0]));
+  }
+  throw new Unk(n.name + '()');
+}
+function ev(n, env) {
+  switch (n.n) {
+    case 'num': case 'str': return n.v;
+    case 'id': return evId(n.name, env);
+    case 'call': return evCall(n, env);
+    case 'tern': return ev(n.c, env) ? ev(n.a, env) : ev(n.b, env);
+    case 'un': { const x = ev(n.a, env); if (n.op === '!') return x ? 0 : 1; evNum(x); return n.op === '-' ? -x : n.op === '~' ? ~x : x; }
+    case 'bin': {
+      if (n.op === '&&') return ev(n.a, env) && ev(n.b, env) ? 1 : 0;
+      if (n.op === '||') return ev(n.a, env) || ev(n.b, env) ? 1 : 0;
+      const a = ev(n.a, env), b = ev(n.b, env);
+      switch (n.op) {
+        case '==': return a === b ? 1 : 0;
+        case '!=': return a !== b ? 1 : 0;
+        case '+': if (typeof a === 'string' || typeof b === 'string') return String(a) + String(b); break;
+        case '<': if (typeof a === 'string' && typeof b === 'string') return a < b ? 1 : 0; break;
+        case '>': if (typeof a === 'string' && typeof b === 'string') return a > b ? 1 : 0; break;
+      }
+      evNum(a); evNum(b);
+      switch (n.op) {
+        case '+': return a + b; case '-': return a - b; case '*': return a * b;
+        case '/': if (!b) throw new Unk('division by zero'); return Math.trunc(a / b);
+        case '%': if (!b) throw new Unk('division by zero'); return a % b;
+        case '<': return a < b ? 1 : 0; case '>': return a > b ? 1 : 0; case '<=': return a <= b ? 1 : 0; case '>=': return a >= b ? 1 : 0;
+        case '|': return a | b; case '&': return a & b; case '^': return a ^ b; case '<<': return a << b; case '>>': return a >> b;
+      }
+    }
+  }
+  throw new Unk('expression');
+}
+
+/* ---------- collector helpers ---------- */
+const newCol = () => ({b: emptyBonus(), applied: [], nc: []});
+const addNum = (col, f, n, text) => { if (!n) return; col.b[f] += n; col.applied.push(text); };
+const addMap = (col, f, key, n, text) => { if (!n) return; col.b[f][key] = (col.b[f][key] || 0) + n; col.applied.push(text); };
+const addFlagMap = (col, f, key, text, val = true) => { col.b[f][key] = val; col.applied.push(text); };
+const addText = (col, text) => { col.b.textOnly.push(text); col.applied.push('(not in numbers) ' + text); };
+const addSkill = (col, id, lv) => { col.b.grantSkills.push({id, lv}); col.applied.push(`Enables ${skName(id)} Lv ${lv}`); };
+const subApplied = s => s.replace(/^\(not in numbers\) /, '');
+
+/* ---------- rAthena bonus handlers ---------- */
+// plain numeric bonuses: lower-case name -> [Bonus field, label, percent?]
+const B1 = {bstr: ['str', 'STR'], bagi: ['agi', 'AGI'], bvit: ['vit', 'VIT'], bint: ['int', 'INT'], bdex: ['dex', 'DEX'], bluk: ['luk', 'LUK'], ballstats: ['allStats', 'all stats'],
+  bmaxhp: ['maxhp', 'Max HP'], bmaxsp: ['maxsp', 'Max SP'], bmaxhprate: ['maxhpRate', 'Max HP', 1], bmaxsprate: ['maxspRate', 'Max SP', 1],
+  batk: ['watk', 'weapon ATK'], bbaseatk: ['batk', 'ATK'], batk2: ['watk2', 'weapon ATK'], bdef: ['def', 'DEF'], bmdef: ['mdef', 'MDEF'], bhit: ['hit', 'HIT'], bflee: ['flee', 'Flee'], bflee2: ['flee2', 'Perfect Dodge'],
+  bcritical: ['cri', 'Critical'], bcriticallong: ['critLong', 'ranged Critical'], batkrate: ['atkRate', 'ATK', 1], bmatkrate: ['matkRate', 'MATK', 1], bmatk: ['matk', 'MATK'],
+  baspdrate: ['aspdRate', 'ASPD', 1], baspd: ['aspd', 'ASPD'], bcastrate: ['castRate', 'cast time', 1], bdelayrate: ['delayRate', 'after-cast delay', 1], bhitrate: ['hitRate', 'HIT', 1], bfleerate: ['fleeRate', 'Flee', 1],
+  bcritatkrate: ['critAtkRate', 'critical damage', 1], blongatkrate: ['longAtkRate', 'ranged damage', 1], bhprecovrate: ['hpRegenRate', 'HP recovery', 1], bsprecovrate: ['spRegenRate', 'SP recovery', 1],
+  busesprate: ['useSpRate', 'SP cost', 1], bdefrate: ['defRate', 'DEF', 1], bdef2rate: ['def2Rate', 'VIT DEF', 1], blongatkdef: ['subLong', 'resistance to ranged attacks', 1]};
+// single-value bonuses that only produce a sentence: name -> [label, percent?]
+const T1 = {badditemhealrate: ['healing from items', 1], bspeedrate: ['movement speed', 1], bhealpower: ['heal power', 1], bhealpower2: ['healing received', 1], bshortweapondamagereturn: ['melee damage reflected', 1], blongweapondamagereturn: ['ranged damage reflected', 1],
+  bmagicdamagereturn: ['chance to reflect magic', 1], bperfecthitrate: ['perfect hit', 1], bperfecthitaddrate: ['perfect hit', 1], bnearatkdef: ['resistance to melee attacks', 1], bmagicatkdef: ['magic resistance', 1],
+  bmiscatkdef: ['trap resistance', 1], bhpgainvalue: ['HP per kill'], bspgainvalue: ['SP per kill'], bdef2: ['VIT DEF'], bmdef2: ['INT MDEF'], bmdefrate: ['MDEF', 1], bmdef2rate: ['INT MDEF', 1], bnomagicdamage: ['magic damage taken', 1]};
+// flag-only (no value) bonuses that only produce a sentence
+const TF = {bnoknockback: 'Cannot be knocked back', bintravision: 'See hidden players', brestartfullrecover: 'Full HP and SP on respawn', bunbreakableweapon: 'Weapon cannot be broken', bunbreakablearmor: 'Armor cannot be broken',
+  bunbreakablehelm: 'Helm cannot be broken', bunbreakableshield: 'Shield cannot be broken', bunbreakablegarment: 'Garment cannot be broken', bunbreakableshoes: 'Shoes cannot be broken', bnowalkdelay: 'No flinch when hit',
+  bnoregen: 'No natural regeneration', bsplashrange: 'Attacks hit surrounding targets', bnoknockbackattack: 'Cannot be knocked back'};
+const N = x => evNum(x);
+const withRace = (n, f) => { n = N(n); if (n === 10 || n === 11) return; const r = raceOf(n); if (!r) throw new Unk('race'); f(r); };
+const withEle = (n, f) => { const e = eleOf(N(n)); if (!e) throw new Unk('element'); f(e); };
+const withSize = (n, f) => { const s = sizeOf(N(n)); if (!s) throw new Unk('size'); f(s); };
+const withCls = (n, f) => { const c = clsOf(N(n)); if (!c) throw new Unk('class'); f(c); };
+const mobOf = (id, ctx) => { const m = ctx.mobByMid && ctx.mobByMid[id]; return {key: m ? m.key : '#' + id, name: m ? m.name : 'monster #' + id}; };
+const itemNameOf = (id, ctx) => { const it = typeof id === 'number' && ctx.itemById ? ctx.itemById(id) : null; return it ? it.name : typeof id === 'number' ? 'item #' + id : String(id).replace(/_/g, ' '); };
+const igName = x => String(x).replace(/^ig_/i, '').replace(/_/g, ' ').toLowerCase();
+const flagWhen = f => (f & 4) && !(f & 8) ? 'melee ' : (f & 8) && !(f & 4) ? 'ranged ' : '';
+
+const H = {1: {}, 2: {}, 3: {}, 4: {}, 5: {}};
+for (const k in B1) { const [f, label, pct] = B1[k]; H[1][k] = (v, col) => { const n = N(v[0]); addNum(col, f, n, `${sg(n)}${pct ? '%' : ''} ${label}`); }; }
+for (const k in T1) { const [label, pct] = T1[k]; H[1][k] = (v, col) => { const n = N(v[0]); addText(col, `${sg(n)}${pct ? '%' : ''} ${label}`); }; }
+for (const k in TF) H[1][k] = (v, col) => addText(col, TF[k]);
+H[1].bnomagicdamage = (v, col) => addText(col, 'Immune to magic');
+H[1].bmdef = (v, col, ctx) => { const n = N(v[0]); if (!ctx.skipMdef) addNum(col, 'mdef', n, `${sg(n)} MDEF`); };   // see itemBonusFrom
+H[1].bsplashrange = (v, col) => addText(col, 'Attacks hit surrounding targets');
+H[1].bagivit = (v, col) => { const n = N(v[0]); col.b.agi += n; col.b.vit += n; col.applied.push(`${sg(n)} AGI and VIT`); };
+H[1].bagidexstr = (v, col) => { const n = N(v[0]); col.b.agi += n; col.b.dex += n; col.b.str += n; col.applied.push(`${sg(n)} STR, AGI and DEX`); };
+H[1].batkele = (v, col) => withEle(v[0], e => { if (e === 'All') throw new Unk('element'); col.b.atkEle = e; col.applied.push(`Weapon element becomes ${e}`); });
+H[1].bdefele = (v, col) => withEle(v[0], e => { if (e === 'All') throw new Unk('element'); col.b.defEle = e; col.applied.push(`Armor element becomes ${e}`); });
+H[1].bignoredefrace = (v, col) => withRace(v[0], r => addFlagMap(col, 'ignoreDefRace', r, `Ignores DEF of ${groupName('race', r)}`));
+H[1].bignoredefclass = (v, col) => withCls(v[0], c => addFlagMap(col, 'ignoreDefClass', c, `Ignores DEF of ${groupName('class', c)}`));
+H[1].bignoremdefrace = (v, col) => withRace(v[0], r => addMap(col, 'ignoreMdefRace', r, 100, `Ignores MDEF of ${groupName('race', r)}`));
+H[1].bignoremdefclass = (v, col) => withCls(v[0], c => addMap(col, 'ignoreMdefClass', c, 100, `Ignores MDEF of ${groupName('class', c)}`));
+H[1].bdefratioatkrace = (v, col) => withRace(v[0], r => addFlagMap(col, 'defRatioAtkRace', r, `Damage depends on the DEF of ${groupName('race', r)}`));
+H[1].bdefratioatkclass = (v, col) => withCls(v[0], c => addFlagMap(col, 'defRatioAtkClass', c, `Damage depends on the DEF of ${groupName('class', c)}`));
+H[1].bnosizefix = (v, col) => { col.b.noSizeFix = true; col.applied.push('Ignores size penalty'); };
+H[1].bnocastcancel = (v, col) => { col.b.noCastCancel = true; col.applied.push('Casting cannot be interrupted'); };
+H[1].bnogemstone = (v, col) => { col.b.noGemstone = true; col.applied.push('Skills need no gemstones'); };
+H[1].bclasschange = (v, col) => addText(col, `${pc(N(v[0]) / 100)}% chance to transform the target into another monster`);
+H[1].bspdrainvalue = (v, col) => { const n = N(v[0]); addText(col, `${n >= 0 ? 'Drains' : 'Loses'} ${Math.abs(n)} SP per hit`); };
+H[1].bhpdrainvalue = (v, col) => { const n = N(v[0]); addText(col, `${n >= 0 ? 'Drains' : 'Loses'} ${Math.abs(n)} HP per hit`); };
+H[1].bbreakweaponrate = (v, col) => addText(col, `${pc(N(v[0]) / 100)}% chance to break the target's weapon`);
+H[1].bbreakarmorrate = (v, col) => addText(col, `${pc(N(v[0]) / 100)}% chance to break the target's armor`);
+
+// bonus2 <type>,<a>,<b>
+const dmgTo = {addRace: ['race', 'damage to'], addEle: ['element', 'damage to'], addSize: ['size', 'damage to'], addClass: ['class', 'damage to'],
+  magicAddRace: ['race', 'magic damage to'], magicAddEle: ['element', 'magic damage to'], magicAddClass: ['class', 'magic damage to'],
+  subRace: ['race', 'resistance to'], subEle: ['element', 'resistance to'], subSize: ['size', 'resistance to'], subClass: ['class', 'resistance to']};
+const mapKinds = {race: withRace, element: withEle, size: withSize, class: withCls};
+for (const [name, field] of [['baddrace', 'addRace'], ['baddele', 'addEle'], ['baddsize', 'addSize'], ['baddclass', 'addClass'], ['bmagicaddrace', 'magicAddRace'], ['bmagicaddele', 'magicAddEle'], ['bmagicaddclass', 'magicAddClass'],
+  ['bsubrace', 'subRace'], ['bsubele', 'subEle'], ['bsubsize', 'subSize'], ['bsubclass', 'subClass']]) {
+  const [kind, what] = dmgTo[field];
+  H[2][name] = (v, col) => { const n = N(v[1]); mapKinds[kind](v[0], x => addMap(col, field, x, n, `${sg(n)}% ${what} ${groupName(kind, x)}`)); };
+}
+H[2].bcriticaladdrace = (v, col) => { const n = N(v[1]); withRace(v[0], r => addMap(col, 'critAddRace', r, n, `${sg(n)} Critical vs ${groupName('race', r)}`)); };
+H[2].bskillatk = (v, col) => { const id = skId(v[0]), n = N(v[1]); addMap(col, 'skillAtk', id, n, `${sg(n)}% damage with ${skName(id)}`); };
+H[2].bcastrate = (v, col) => { const id = skId(v[0]), n = N(v[1]); addMap(col, 'skillCast', id, n, `${sg(n)}% cast time of ${skName(id)}`); };
+H[2].badddamageclass = (v, col, ctx) => { const id = N(v[0]), n = N(v[1]), m = mobOf(id, ctx); addMap(col, 'addMob', m.key, n, `${sg(n)}% damage to ${m.name}`); };
+H[2].bignoremdefclassrate = (v, col) => { const n = N(v[1]); withCls(v[0], c => addMap(col, 'ignoreMdefClass', c, n, `Ignores ${pc(n)}% of MDEF of ${groupName('class', c)}`)); };
+H[2].bignoremdefracerate = (v, col) => { const n = N(v[1]); withRace(v[0], r => addMap(col, 'ignoreMdefRace', r, n, `Ignores ${pc(n)}% of MDEF of ${groupName('race', r)}`)); };
+H[2].baddeff = (v, col) => addText(col, `${pc(N(v[1]) / 100)}% chance to inflict ${effName(v[0])} on attack`);
+H[2].baddeff2 = (v, col) => addText(col, `${pc(N(v[1]) / 100)}% chance to inflict ${effName(v[0])} on yourself when attacking`);
+H[2].baddeffwhenhit = (v, col) => addText(col, `${pc(N(v[1]) / 100)}% chance to inflict ${effName(v[0])} when hit`);
+H[2].breseff = (v, col) => addText(col, `${sg(N(v[1]) / 100)}% resistance to ${effName(v[0])}`);
+H[2].bhpdrainrate = (v, col) => addText(col, `${pc(N(v[0]) / 10)}% chance to drain ${N(v[1])}% of damage as HP`);
+H[2].bspdrainrate = (v, col) => addText(col, `${pc(N(v[0]) / 10)}% chance to drain ${N(v[1])}% of damage as SP`);
+H[2].bspdrainvalue = (v, col) => addText(col, `Drains ${N(v[1])} SP per hit`);
+H[2].bspdrainvaluerace = (v, col) => withRace(v[0], r => addText(col, `Drains ${N(v[1])} SP per hit on ${groupName('race', r)}`));
+H[2].bhpdrainvaluerace = (v, col) => withRace(v[0], r => addText(col, `Drains ${N(v[1])} HP per hit on ${groupName('race', r)}`));
+H[2].bspgainrace = (v, col) => withRace(v[0], r => addText(col, `${sg(N(v[1]))} SP per ${groupName('race', r)} kill`));
+H[2].bhpgainrace = (v, col) => withRace(v[0], r => addText(col, `${sg(N(v[1]))} HP per ${groupName('race', r)} kill`));
+H[2].bexpaddrace = (v, col) => withRace(v[0], r => addText(col, `${sg(N(v[1]))}% EXP from ${groupName('race', r)}`));
+H[2].bcomarace = (v, col) => withRace(v[0], r => addText(col, `${pc(N(v[1]) / 100)}% chance of Coma vs ${groupName('race', r)}`));
+H[2].bcomaclass = (v, col) => withCls(v[0], c => addText(col, `${pc(N(v[1]) / 100)}% chance of Coma vs ${groupName('class', c)}`));
+H[2].bweaponcomarace = H[2].bcomarace;
+H[2].bweaponcomaclass = H[2].bcomaclass;
+H[2].bhplossrate = (v, col) => addText(col, `Loses ${N(v[0])} HP every ${pc(N(v[1]) / 1000)}s`);
+H[2].bsplossrate = (v, col) => addText(col, `Loses ${N(v[0])} SP every ${pc(N(v[1]) / 1000)}s`);
+H[2].bhpregenrate = (v, col) => addText(col, `Regenerates ${N(v[0])} HP every ${pc(N(v[1]) / 1000)}s`);
+H[2].bspregenrate = (v, col) => addText(col, `Regenerates ${N(v[0])} SP every ${pc(N(v[1]) / 1000)}s`);
+H[2].bspvanishrate = (v, col) => addText(col, `${pc(N(v[0]) / 10)}% chance to destroy ${N(v[1])}% of the target's SP`);
+H[2].bhpvanishrate = (v, col) => addText(col, `${pc(N(v[0]) / 10)}% chance to destroy ${N(v[1])}% of the target's HP`);
+H[2].bskillheal = (v, col) => addText(col, `${sg(N(v[1]))}% healing of ${skName(v[0])}`);
+H[2].bskillheal2 = H[2].bskillheal;
+H[2].bskillusesp = (v, col) => addText(col, `${skName(v[0])} costs ${N(v[1])} SP less`);
+H[2].baddskillblow = (v, col) => addText(col, `${skName(v[0])} knocks back ${N(v[1])} cells`);
+H[2].badditemhealrate = (v, col, ctx) => addText(col, `${sg(N(v[1]))}% healing from ${itemNameOf(v[0], ctx)}`);
+H[2].badditemgrouphealrate = (v, col) => addText(col, `${sg(N(v[1]))}% healing from ${igName(v[0])} items`);
+H[2].baddmonsterdropitem = (v, col, ctx) => addText(col, `${pc(N(v[1]) / 100)}% chance to get ${itemNameOf(v[0], ctx)} from kills`);
+H[2].baddmonsterdropitemgroup = (v, col) => addText(col, `${pc(N(v[1]) / 100)}% chance to get a ${igName(v[0])} item from kills`);
+H[2].bgetzenynum = (v, col) => addText(col, `${N(v[1])}% chance to get up to ${N(v[0])} zeny per kill`);
+H[2].badddefmonster = (v, col, ctx) => addText(col, `${sg(N(v[1]))}% resistance to ${mobOf(N(v[0]), ctx).name}`);
+// bonus2 bAddRace2 / bSubRace2 / bMagicAddRace2 <RC2 id or RC2_ name>, n (pc.cpp:4799, 4821, 5084: PC_BONUS_CHK_RACE2 = valid id 1 .. RC2_MAX-1)
+const withRace2 = (n, f) => { n = N(n); const r = RC2[n]; if (!(n > 0) || !r) throw new Unk('race2'); f(r); };
+for (const [name, field, what] of [['baddrace2', 'addRace2', 'damage to'], ['bsubrace2', 'subRace2', 'resistance to'], ['bmagicaddrace2', 'magicAddRace2', 'magic damage to']]) {
+  H[2][name] = (v, col) => { const n = N(v[1]); withRace2(v[0], r => addMap(col, field, r, n, `${sg(n)}% ${what} ${r} monsters`)); };
+}
+
+// bonus3 <type>,<a>,<b>,<c>
+const spellText = (sk, lv, rate, when) => `Autocasts ${skName(sk)} Lv ${lv} ${when} (${pc(rate / 10)}% chance)`;
+const hitWhen = bf => bf & 8 && !(bf & 4) ? 'when hit by magic' : bf & 4 && !(bf & 8) ? 'when hit by a weapon attack' : 'when hit';
+H[3].bautospell = (v, col) => addText(col, spellText(v[0], N(v[1]), N(v[2]), 'on attack'));
+H[3].bautospellwhenhit = (v, col) => addText(col, spellText(v[0], N(v[1]), N(v[2]), 'when hit'));
+H[3].baddeff = (v, col) => addText(col, `${pc(N(v[1]) / 100)}% chance to inflict ${effName(v[0])} on ${(N(v[2]) & 1) && !(N(v[2]) & 2) ? 'yourself when ' : ''}${flagWhen(N(v[2]))}attack`);
+H[3].baddeffwhenhit = (v, col) => addText(col, `${pc(N(v[1]) / 100)}% chance to inflict ${effName(v[0])} when hit`);
+H[3].baddmonsterdropitem = (v, col, ctx) => withRace(v[1], r => addText(col, `${pc(N(v[2]) / 100)}% chance to get ${itemNameOf(v[0], ctx)} from ${groupName('race', r)}`));
+H[3].baddmonsterdropitemgroup = (v, col) => withRace(v[1], r => addText(col, `${pc(N(v[2]) / 100)}% chance to get a ${igName(v[0])} item from ${groupName('race', r)}`));
+H[3].bhpdrainrate = (v, col) => addText(col, `${pc(N(v[0]) / 10)}% chance to drain ${N(v[1])}% of damage as HP`);
+H[3].bspdrainrate = (v, col) => addText(col, `${pc(N(v[0]) / 10)}% chance to drain ${N(v[1])}% of damage as SP`);
+// bonus4 / bonus5
+H[4].bautospell = (v, col) => addText(col, spellText(v[0], N(v[1]), N(v[2]), N(v[3]) ? 'on attack (on yourself)' : 'on attack'));
+H[4].bautospellwhenhit = (v, col) => addText(col, spellText(v[0], N(v[1]), N(v[2]), 'when hit'));
+H[4].bautospellonskill = (v, col) => addText(col, `Autocasts ${skName(v[1])} Lv ${N(v[2])} when using ${skName(v[0])} (${pc(N(v[3]) / 10)}% chance)`);
+H[5].bautospell = (v, col) => addText(col, spellText(v[0], N(v[1]), N(v[2]), 'on attack'));
+H[5].bautospellwhenhit = (v, col) => addText(col, spellText(v[0], N(v[1]), N(v[2]), hitWhen(N(v[3]))));
+H[5].bautospellonskill = H[4].bautospellonskill;
+
+/* ---------- script execution ---------- */
+const IGNORED = new Set(['end', 'specialeffect', 'specialeffect2']);
+function bonusCmd(arity, n, env, col) {
+  const a = n.args;
+  if (!a.length || a[0].n !== 'id') throw new Unk('bonus type');
+  const h = H[arity][a[0].name.toLowerCase()];
+  if (!h) { col.nc.push(n.raw); return; }
+  h(a.slice(1).map(x => ev(x, env)), col, env.ctx);
+}
+function autobonusCmd(kind, n, env, col) {
+  const v = n.args.map(x => ev(x, env));
+  if (typeof v[0] !== 'string') throw new Unk('autobonus');
+  const sub = newCol(); runInto(v[0], env.ctx, sub);
+  const rate = N(v[1]) / 10, dur = N(v[2]) / 1000, bf = v[3] | 0;
+  const when = kind === 2 ? hitWhen(bf) : kind === 3 ? 'when using a skill' : bf & 8 ? 'when attacking with magic' : 'on attack';
+  const parts = sub.applied.map(subApplied).concat(sub.nc.map(s => 'unrecognized: ' + s));
+  col.nc.push(...sub.nc);
+  addText(col, `${pc(rate)}% chance ${when} for ${pc(dur)}s: ${parts.join('; ') || 'special effect'}`);
+}
+function runCmd(n, env, col) {
+  const lc = n.name.toLowerCase();
+  try {
+    if (lc === 'end') { env.ended = true; return; }
+    if (lc === 'set' && n.args.length === 2 && n.args[0].n === 'id') { env.vars[n.args[0].name.toLowerCase()] = ev(n.args[1], env); return; }
+    if (/^bonus[2-5]?$/.test(lc)) return bonusCmd(lc === 'bonus' ? 1 : +lc[5], n, env, col);
+    if (lc === 'skill') { const v = n.args.map(x => ev(x, env)); return addSkill(col, skId(v[0]), N(v[1])); }
+    if (lc === 'autobonus' || lc === 'autobonus2' || lc === 'autobonus3') return autobonusCmd(lc === 'autobonus' ? 1 : +lc[9], n, env, col);
+    if (IGNORED.has(lc)) return;
+    col.nc.push(n.raw);
+  } catch (e) { col.nc.push(n.raw); }
+}
+function exec(n, env, col) {
+  if (!n || env.ended) return;
+  switch (n.k) {
+    case 'block': for (const s of n.body) { exec(s, env, col); if (env.ended) return; } break;
+    case 'if': {
+      let c;
+      try { c = ev(n.cond, env); } catch (e) { col.nc.push(n.raw); return; }
+      exec(c ? n.then : n.else, env, col);
+      break;
+    }
+    case 'assign': {
+      try {
+        const k = n.name.toLowerCase(), x = ev(n.e, env);
+        env.vars[k] = n.op === '=' ? x : ev({n: 'bin', op: n.op[0], a: {n: 'num', v: env.vars[k] || 0}, b: {n: 'num', v: x}}, env);
+      } catch (e) { col.nc.push(n.raw); }
+      break;
+    }
+    case 'cmd': runCmd(n, env, col); break;
+    case 'bad': col.nc.push(n.raw); break;
+  }
+}
+function runInto(src, ctx, col) {
+  let ast;
+  try { ast = parse(String(src || '')); } catch (e) { col.nc.push(oneLine(String(src))); return; }
+  const env = {ctx, vars: {}, ended: false};
+  try { for (const s of ast) { exec(s, env, col); if (env.ended) break; } } catch (e) { col.nc.push(oneLine(String(src))); }   // e.g. stack overflow on absurd nesting
+}
+function runScript(src, ctx) {
+  const col = newCol();
+  runInto(src, mkCtx(ctx), col);
+  return {bonus: col.b, applied: col.applied, notCalculated: col.nc};
+}
+
+/* ---------- Ep 8 (Aegis) translator ---------- */
+// AddExtParam / SubExtParam User VAR_*: [Bonus field, label, divisor, percent?]
+const VARMAP = {VAR_STRAMOUNT: ['str', 'STR'], VAR_AGIAMOUNT: ['agi', 'AGI'], VAR_VITAMOUNT: ['vit', 'VIT'], VAR_INTAMOUNT: ['int', 'INT'], VAR_DEXAMOUNT: ['dex', 'DEX'], VAR_LUKAMOUNT: ['luk', 'LUK'],
+  VAR_MAXHPAMOUNT: ['maxhp', 'Max HP'], VAR_MAXSPAMOUNT: ['maxsp', 'Max SP'], VAR_MAXHPPERCENT: ['maxhpRate', 'Max HP', 1, 1], VAR_MAXSPPERCENT: ['maxspRate', 'Max SP', 1, 1],
+  VAR_ATTPOWER: ['batk', 'ATK'], VAR_ITEMDEFPOWER: ['def', 'DEF'], VAR_MDEFPOWER: ['mdef', 'MDEF'], VAR_HITSUCCESSVALUE: ['hit', 'HIT'], VAR_AVOIDSUCCESSVALUE: ['flee', 'Flee'],
+  VAR_PLUSAVOIDSUCCESSVALUE: ['flee2', 'Perfect Dodge', 10], VAR_CRITICALSUCCESSVALUE: ['cri', 'Critical', 10], VAR_PLUSASPD: ['aspd', 'ASPD'], VAR_PLUSASPDPERCENT: ['aspdRate', 'ASPD', 1, 1],
+  VAR_MAGICATKPERCENT: ['matkRate', 'MATK', 1, 1], VAR_HPACCELERATION: ['hpRegenRate', 'HP recovery', 1, 1], VAR_SPACCELERATION: ['spRegenRate', 'SP recovery', 1, 1]};
+const STATKEYS = {STR: 'str', AGI: 'agi', VIT: 'vit', INT: 'int', DEX: 'dex', LUK: 'luk'};
+const AEGIS_NULL = new Set(['DisableSkill', 'Cure', 'ResetIgnoreDEFRace', 'ResetIgnoreDEFClass', 'ResetDisappearSPAmount', 'ResetDisappearHPAmount', 'ResetInvestigate', 'ResetPushingSkill']);
+// Aegis race / property names -> data names (unknown names make the line unparsable)
+const aRace = x => { const r = RACEN[x]; if (!r) throw new Unk(x); return r; };
+const aEle = x => { const e = PROPN[x]; if (!e) throw new Unk(x); return e; };
+function aegisLine(line, col, ctx, statSeen) {
+  const raw = oneLine(line);
+  if (!raw) return;
+  const a = raw.split(' '), c = a.shift(), sub = c.startsWith('Sub'), pm = sub ? -1 : 1, nv = i => { const x = +a[i]; if (a[i] === undefined || x !== x) throw new Unk('number'); return x; };
+  const addR = (f, key, n, what) => addMap(col, f, key, n, `${sg(n)}% ${what}`);
+  switch (c) {
+    case 'AddExtParam': case 'SubExtParam': {
+      const m = VARMAP[a[1]];
+      if (a[0] !== 'User' || !m) throw new Unk(a[1]);
+      if (statSeen && statSeen[m[0]]) return;                       // already given by item.stats (the data repeats some stat lines there)
+      const n = nv(2) * pm / (m[2] || 1);
+      return addNum(col, m[0], n, `${sg(n)}${m[3] ? '%' : ''} ${m[1]}`);
+    }
+    case 'EnableSkill': return a[0] === 'SA_AUTOSPELL' ? undefined : addSkill(col, a[0], nv(1));
+    case 'SetAutoSpell': return a[0] !== '0' ? addText(col, `Autocasts ${skName(a[0])} on attack`) : undefined;
+    case 'RaceAddDamage': case 'RaceSubDamage': return addR('addRace', aRace(a[0]), nv(1) * pm, `damage to ${aRace(a[0])}`);
+    case 'AttrAddDamage': case 'AttrAddDamageSelf': case 'AttrSubDamage': return addR('addEle', aEle(a[0]), nv(1) * pm, `damage to ${aEle(a[0])} element`);
+    case 'AddDamage_Size': if (a[0] === 'Target') return addR('addSize', a[1], nv(2), `damage to ${a[1]} size`); return addR('subSize', a[1], -nv(2), `resistance to ${a[1]} size`);
+    case 'ClassAddDamage': {
+      const cl = a[0] === '1' ? 'Boss' : 'Normal', n = nv(2);
+      return a[1] === 'Target' ? addR('addClass', cl, n, `damage to ${groupName('class', cl)}`) : addR('subClass', cl, -n, `resistance to ${groupName('class', cl)}`);
+    }
+    case 'NameAddDamage': {
+      const n = nv(2);
+      return a[1] === 'Target' ? addMap(col, 'addMob', a[0], n, `${sg(n)}% damage to ${(ctx.mobByKey && ctx.mobByKey[a[0]] && ctx.mobByKey[a[0]].name) || a[0]}`) : addText(col, `${sg(n)}% damage taken from ${a[0]}`);
+    }
+    case 'AddCRIPercent_Race': { const n = nv(1) / 10; return addMap(col, 'critAddRace', aRace(a[0]), n, `${sg(n)} Critical vs ${aRace(a[0])}`); }
+    case 'SetIgnoreDEFRace': return addFlagMap(col, 'ignoreDefRace', aRace(a[0]), `Ignores DEF of ${aRace(a[0])}`);
+    case 'SetIgnoreDEFClass': { const cl = a[0] === 'CLASS_Boss' ? 'Boss' : 'Normal'; return addFlagMap(col, 'ignoreDefClass', cl, `Ignores DEF of ${groupName('class', cl)}`); }
+    case 'AddAttrTolerace': case 'SubAttrTolerace': return addR('subEle', aEle(a[0]), nv(1) * pm, `resistance to ${aEle(a[0])} element`);
+    case 'AddRaceTolerace': case 'SubRaceTolerace': return addR('subRace', aRace(a[0]), nv(1) * pm, `resistance to ${aRace(a[0])}`);
+    case 'RaceAddDamageSelf': return addR('subRace', aRace(a[0]), -nv(1), `resistance to ${aRace(a[0])}`);
+    case 'AddRangeAttackDamage': case 'SubRangeAttackDamage': { const n = nv(1) * -pm; return addNum(col, 'subLong', n, `${sg(n)}% resistance to ranged attacks`); }
+    case 'BodyAttribute': { const e = aEle(a[0]); col.b.defEle = e; return col.applied.push(`Armor element becomes ${e}`); }
+    case 'AddSpellCastTime': case 'SubSpellCastTime': { const n = nv(0) * pm; return addNum(col, 'castRate', n, `${sg(n)}% cast time`); }
+    case 'AddSPconsumption': case 'SubSPconsumption': { const n = nv(0) * pm; return addNum(col, 'useSpRate', n, `${sg(n)}% SP cost`); }
+    case 'ModifyDEF_Fraction': {
+      const x = nv(0), y = nv(1);
+      if (!(x < y)) return;
+      const n = Math.round(-100 * (1 - x / y));
+      col.b.defRate += n; col.b.def2Rate += n; return col.applied.push(`${sg(n)}% DEF (hard and soft)`);
+    }
+    case 'NoDispell': if (a[0] === '1') { col.b.noCastCancel = true; col.applied.push('Casting cannot be interrupted'); } return;
+    case 'NoJamstone': if (a[0] === '1') { col.b.noGemstone = true; col.applied.push('Skills need no gemstones'); } return;
+    case 'PerfectDamage': if (a[0] === '1') { col.b.noSizeFix = true; col.applied.push('Ignores size penalty'); } return;
+    case 'IndestructibleWeapon': return a[0] === '1' ? addText(col, 'Weapon cannot be broken') : undefined;
+    case 'IndestructibleArmor': return a[0] === '1' ? addText(col, 'Armor cannot be broken') : undefined;
+    case 'Magicimmune': return a[0] === '1' ? addText(col, 'Immune to magic') : undefined;
+    case 'Reincarnation': return a[0] === '1' ? addText(col, 'Full HP and SP on respawn') : undefined;
+    case 'SplashAttack': return a[0] === '1' ? addText(col, 'Attacks hit surrounding targets') : undefined;
+    case 'Condition': {
+      const dur = a[1] === '9999' ? 'permanently' : `for ${a[1]} s`, s = a[0];
+      if (s === 'EFFECTHaste') return addText(col, `Movement speed +25% ${dur}`);
+      if (s === 'EFFECTEndure') return addText(col, `Endure effect ${dur}`);
+      if (s === 'EFFECTHasteAttack') return addText(col, `ASPD +${a[2]}% ${dur} (timed effect, not added to ASPD)`);
+      if (s === 'EFFECTPlusAttackPower') return addText(col, `ATK +${a[2]} ${dur}`);
+      if (s === 'EFFECTPlusMagicPower') return addText(col, `MATK +${a[2]} ${dur}`);
+      if (s === 'EFFECTWedding') return addText(col, `Wedding effect ${dur}`);
+      return addText(col, `${a[2]}% chance to be ${nm(STATEN, s)} ${dur}`);
+    }
+    case 'AddStateAttack': return addText(col, `${pc(nv(1) / 10)}% chance to inflict ${nm(STATEN, a[0])} on attack`);
+    case 'AddAtkStateSelf': return addText(col, `${pc(nv(1) / 10)}% chance to inflict ${nm(STATEN, a[0])} on yourself when attacking`);
+    case 'AddStateTolerace': case 'SubStateTolerace': return addText(col, `${sg(nv(1) * pm)}% resistance to ${nm(STATEN, a[0])}`);
+    case 'AddAtk_Coma': return addText(col, `${pc(nv(0) / 100)}% chance to cause Coma on attack`);
+    case 'AddAtk_ComaRace': return addText(col, `${pc(nv(1) / 100)}% chance to cause Coma to ${aRace(a[0])}`);
+    case 'AddAtk_DamageWeapon': return addText(col, `${nv(1)}% chance to break the target's weapon`);
+    case 'AddAtk_DamageArmor': return addText(col, `${nv(1)}% chance to break the target's armor`);
+    case 'AddHPdrain': return addText(col, `${nv(0)}% chance to drain ${nv(1)}% of damage as HP`);
+    case 'AddSPdrain': return addText(col, `${nv(0)}% chance to drain ${nv(1)}% of damage as SP`);
+    case 'AddDestroySP_Attack': return addText(col, `${nv(1)}% chance to drain ${nv(2)}% of the target's SP`);
+    case 'AddSPAmount_Action': case 'SubSPAmount_Action': return addText(col, `${sub ? 'Loses' : 'Gains'} ${nv(1)} SP per attack`);
+    case 'AddSPAmount_Attack': return addText(col, `Gains ${nv(1)} SP per hit`);
+    case 'AddSPAmount_AtkRace': return addText(col, `Gains ${nv(2)} SP per hit on ${aRace(a[0])}`);
+    case 'AddSPAmount_Kill': return addText(col, `Gains ${nv(0)} SP per kill`);
+    case 'AddSPAmount_KillRace': return addText(col, `Gains ${nv(1)} SP per ${aRace(a[0])} kill`);
+    case 'AddEXPPercent_KillRace': return addText(col, `+${nv(1)}% EXP from ${aRace(a[0])}`);
+    case 'SetDisappearSPAmount': return addText(col, `Loses ${nv(2)} SP every ${nv(1)} seconds`);
+    case 'SetDisappearHPAmount': return addText(col, `Loses ${nv(2)} HP every ${nv(1)} seconds`);
+    case 'AddMeleeAttackReflect': return addText(col, `Reflects ${nv(0)}% of melee damage`);
+    case 'AddChangeMonster': return addText(col, `${nv(0)}% chance to transform the target into another monster`);
+    case 'SetPushingSkill': return addText(col, `${skName(a[0])} Lv ${nv(1)} knocks the target back`);
+    case 'AddGuideAttack': return addText(col, `+${nv(0)}% perfect hit`);
+    case 'AddReceiveItem_Race': return addText(col, `${nv(2)}% chance to get ${a[1].replace(/_/g, ' ')} from ${aRace(a[0])}`);
+    case 'SetInvestigate': return addFlagMap(col, 'defRatioAtkClass', 'All', 'Damage depends on the DEF of all monsters (like Investigate)');   // same as rAthena bDefRatioAtkClass,Class_All
+  }
+  if (AEGIS_NULL.has(c)) return;
+  throw new Unk(c);
+}
+function ep8Into(item, ctx, col) {
+  const st = item.stats || {}, seen = {};
+  for (const k in STATKEYS) if (st[k]) { seen[STATKEYS[k]] = true; addNum(col, STATKEYS[k], st[k], `${sg(st[k])} ${k}`); }
+  const sc = item.script;
+  if (!sc) return;
+  for (const ev of Object.keys(sc)) for (const line of sc[ev]) {
+    try { aegisLine(line, col, ctx, seen); } catch (e) { col.nc.push(oneLine(line)); }
+  }
+}
+
+/* ---------- items ---------- */
+function pickSource(item) {
+  if (!item) return 'none';
+  const sc = item.script, hasLines = sc && Object.keys(sc).some(k => Array.isArray(sc[k]) && sc[k].length);
+  if (hasLines || (item.stats && Object.keys(item.stats).length)) return 'ep8';
+  if (item.ra && item.ra.script && String(item.ra.script).trim()) return 'rathena';
+  return 'none';
+}
+function itemBonusFrom(item, ctx, source) {
+  const c = mkCtx(ctx), col = newCol();
+  if (item && source === 'ep8') ep8Into(item, c, col);
+  else if (item && source === 'rathena' && item.ra && item.ra.script) {
+    // rAthena expresses item MDEF as `bonus bMdef`; an Ep 8 item carries it in item.mdef (read by calc-status), so do not count it twice
+    c.skipMdef = typeof item.mdef === 'number' && !item.fromRA;
+    runInto(item.ra.script, c, col);
+  }
+  return {bonus: col.b, source, applied: col.applied, notCalculated: col.nc};
+}
+const itemBonus = (item, ctx) => itemBonusFrom(item, ctx, pickSource(item));
+
+return {emptyBonus, addBonus, runScript, itemBonus, itemBonusFrom, pickSource, fields: {num: NUMF, map: MAPF, bool: BOOLF}};
+});

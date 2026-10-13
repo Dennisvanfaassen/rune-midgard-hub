@@ -1,0 +1,668 @@
+/* calc-status.js: port of rAthena pre-renewal status_calc_pc (+ status_calc_bl_main, status_base_*) -> Status (CalcStatus).
+ * UMD, no DOM. Reference: upstream rAthena src/map/status.cpp, pc.cpp, skill.cpp (pre-renewal branches only).
+ *
+ *   CalcStatus.compute(build, D) -> Status       D = { CALCDATA, items (by key), SKT, mobByMid? }
+ *   CalcStatus.validate(build, D) -> [problem]
+ *   CalcStatus.BUFFS                              [{ id, name, maxLv, group, kind, jobs?, values? }]
+ *   CalcStatus.weaponType(item|null)              Fist Dagger 1hSword 2hSword 1hSpear 2hSpear 1hAxe 2hAxe Mace Staff Bow Knuckle Musical Whip Book Katar
+ *   CalcStatus.SONG_CASTER                        default song caster {agi, dex, int, vit, luk, lessons}
+ *
+ * Extra Status fields beyond the spec (all optional for consumers):
+ *   right/left.star, right/left.forged, status.criBase (crit without the katar x2; status.cri includes it), status.shieldItem {key, refine, weight}, status.dualWield, status.twoHanded,
+ *   status.spCostRate (100 = normal), status.buffInfo (self/party flags, ASPD haste actually applied), status.ammo.{bonus,hit,cri}.
+ * Iteration 2 additions:
+ *   status.riding / status.falcon  resolved booleans (settings.riding needs KN_RIDING learned; settings.falcon is Hunter + HT_FALCON); battle reads these
+ *   status.armorEle                armor element (bDefEle, last wins) used by the Sage field conditions
+ *   status.regen                   {hp, hpInterval, sp, spInterval, skillHp, skillHpInterval, skillSp, skillSpInterval, sitHp, sitSp, sitInterval, spBlocked, notes}
+ *   build.buffs.SA_AUTOSPELL       {lv, skill}; echoed in status.buffs as {lv, skill, cap, spellLv, known}
+ *   BUFFS additions                SA_VOLCANO SA_DELUGE SA_VIOLENTGALE BD_DRUMBATTLEFIELD BD_RINGNIBELUNGEN CR_DEFENDER SA_AUTOSPELL (kind 'autospell', values = spell ids)
+ * Iteration 3 additions:
+ *   build.pet    {mob, loyal, acc}: the pet's bonus script (D.pets: array or {MOBKEY: pet}, from DATA.pets, field `script`) runs after the cards and foods, like status.cpp:4205-4212
+ *                (after the param_equip memcpy at 4093, so stat bonuses count as card bonuses); it only counts when loyal (the data flag loyalOnly) and, with D.petEquipRequired
+ *                (battle_config.pet_equip_required, default 0 = off, battle.cpp:8534), only with the accessory (acc). status.items slot 'pet', key = mob key.
+ *   build.manual sparse {str.. allStats, batk, watk, matk, def, mdef, hit, flee, flee2, cri, maxhp, maxsp, maxhpRate, maxspRate, aspdRate, matkRate, castRate, critAtkRate, longAtkRate,
+ *                addRace, addEle, addSize, addClass, subRace, subEle, skillAtk}: typed-in extra bonuses, merged like an equipment script (stats count in param_equip); status.items slot 'manual'.
+ * Units: cri / flee2 in display units (internal /10); castRate / delayRate / atkRate / matkRate are multipliers (100 = normal);
+ *   atkRate = Provoke / Auto Berserk ATK% only; critAtkRate / longAtkRate are percent deltas (0 = none); amotion in ms, adelay = 2 * amotion, aspd = (2000 - amotion) / 10.
+ */
+(function (root, f) { const m = f(typeof module === 'object' && module.exports ? require('./calc-script.js') : root.CalcScript); if (typeof module === 'object' && module.exports) module.exports = m; else root.CalcStatus = m; })(typeof self !== 'undefined' ? self : this, function (CalcScript) {
+'use strict';
+
+const T = Math.trunc, MX = Math.max, MN = Math.min;
+const clamp = (v, a, b) => MN(b, MX(a, v));
+const ST = ['str', 'agi', 'vit', 'int', 'dex', 'luk'];
+const SLOTS = ['weapon', 'left', 'headTop', 'headMid', 'headLow', 'armor', 'garment', 'shoes', 'acc1', 'acc2', 'ammo'];
+// rAthena EQI order (status_calc_pc_sub loops i = 0..EQI_MAX): ACC_L, ACC_R, SHOES, GARMENT, HEAD_LOW, HEAD_MID, HEAD_TOP, ARMOR, HAND_L, HAND_R
+const ORDER = ['acc1', 'acc2', 'shoes', 'garment', 'headLow', 'headMid', 'headTop', 'armor', 'left', 'weapon'];
+const EQI = {EQI_HEAD_TOP: 'headTop', EQI_HEAD_MID: 'headMid', EQI_HEAD_LOW: 'headLow', EQI_ARMOR: 'armor', EQI_HAND_R: 'weapon', EQI_HAND_L: 'left', EQI_GARMENT: 'garment', EQI_SHOES: 'shoes', EQI_ACC_L: 'acc1', EQI_ACC_R: 'acc2'};
+const ELES = ['Neutral', 'Water', 'Earth', 'Fire', 'Wind', 'Poison', 'Holy', 'Dark', 'Ghost', 'Undead'];
+const jobDisplay = j => j === 'Supernovice' ? 'Super Novice' : j;
+const zero6 = () => ({str: 0, agi: 0, vit: 0, int: 0, dex: 0, luk: 0});
+
+/* ---------- weapon type ---------- */
+const WT = {'One-handed Sword': '1hSword', 'Two-handed Sword': '2hSword', Dagger: 'Dagger', Katar: 'Katar', 'One-handed Axe': '1hAxe', 'Two-handed Axe': '2hAxe',
+  'One-handed Spear': '1hSpear', 'Two-handed Spear': '2hSpear', Staff: 'Staff', Mace: 'Mace', Book: 'Book', Bow: 'Bow', Knuckle: 'Knuckle', 'Musical Instrument': 'Musical', Whip: 'Whip'};
+const WTRA = {'2hStaff': 'Staff', '2hMace': 'Mace'};
+const WTKEYS = new Set(Object.values(WT));
+// sub "Weapon" (5 items, all Gunslinger-only, none usable by a Soulbound job) has no rAthena key in the list: mapped to Bow
+// (a ranged DEX weapon, like status_base_atk's guns branch); calc-status.validate rejects them anyway through item.jobs.
+function weaponType(item) {
+  if (!item || item.type !== 'Weapon') return 'Fist';
+  if (WT[item.sub]) return WT[item.sub];
+  const r = item.ra && item.ra.sub;
+  if (r && (WTKEYS.has(r) || WTRA[r])) return WTRA[r] || r;
+  return 'Bow';
+}
+const isRanged = t => t === 'Bow' || t === 'Musical' || t === 'Whip';   // status_base_atk: W_BOW, W_MUSICAL, W_WHIP (+ guns) swap STR/DEX
+
+/* ---------- buffs ---------- */
+const LINE = {
+  acolyte: ['Acolyte', 'Priest', 'Monk', 'Supernovice'], archer: ['Archer', 'Hunter', 'Bard', 'Dancer', 'Supernovice'],
+  sword: ['Swordman', 'Knight', 'Crusader', 'Supernovice'], merchant: ['Merchant', 'Blacksmith', 'Alchemist']};
+const B = (id, name, maxLv, group, jobs, kind) => Object.assign({id, name, maxLv, group, kind: kind || 'level'}, jobs ? {jobs} : {});
+const BUFFS = [
+  B('AL_BLESSING', 'Blessing', 10, 'party', LINE.acolyte), B('AL_INCAGI', 'Increase AGI', 10, 'party', LINE.acolyte), B('AL_ANGELUS', 'Angelus', 10, 'party', LINE.acolyte),
+  B('PR_GLORIA', 'Gloria', 5, 'party', ['Priest']), B('PR_MAGNIFICAT', 'Magnificat', 5, 'party', ['Priest']), B('PR_IMPOSITIO', 'Impositio Manus', 5, 'party', ['Priest']),
+  B('PR_SUFFRAGIUM', 'Suffragium', 3, 'party', ['Priest']), B('AC_CONCENTRATION', 'Improve Concentration', 10, 'self', LINE.archer),
+  B('BS_ADRENALINE', 'Adrenaline Rush', 5, 'party', ['Blacksmith']), B('BS_ADRENALINE2', 'Full Adrenaline Rush', 1, 'party', ['Blacksmith']),
+  B('BS_WEAPONPERFECT', 'Weapon Perfection', 5, 'party', ['Blacksmith']), B('BS_OVERTHRUST', 'Over Thrust', 5, 'party', ['Blacksmith']),
+  B('BS_MAXIMIZE', 'Maximize Power', 5, 'self', ['Blacksmith']), B('KN_TWOHANDQUICKEN', 'Two-Hand Quicken', 10, 'self', ['Knight']),
+  B('KN_ONEHAND', 'One-Hand Quicken', 1, 'self', ['Knight']), B('CR_SPEARQUICKEN', 'Spear Quicken', 10, 'self', ['Crusader']),
+  B('SM_ENDURE', 'Endure', 10, 'self', LINE.sword), B('SM_PROVOKE', 'Provoke (self)', 10, 'self', LINE.sword),
+  B('SM_AUTOBERSERK', 'Auto Berserk (HP < 25%)', 1, 'self', ['Swordman', 'Knight', 'Crusader'], 'bool'), B('SM_MAGNUM', 'Magnum Break fire bonus', 1, 'self', LINE.sword, 'bool'),
+  B('MC_LOUD', 'Loud Exclamation', 1, 'self', LINE.merchant.slice(0, 3), 'bool'),
+  B('MO_EXPLOSIONSPIRITS', 'Fury', 5, 'self', ['Monk']), B('MO_STEELBODY', 'Steel Body', 1, 'self', ['Monk'], 'bool'), B('MO_CALLSPIRITS', 'Spirit spheres', 5, 'self', ['Monk'], 'count'),
+  B('AS_POISONREACT', 'Poison React', 10, 'self', ['Assassin']), B('AS_ENCHANTPOISON', 'Enchant Poison', 10, 'endow', ['Assassin']),
+  B('PR_ASPERSIO', 'Aspersio', 5, 'endow', ['Priest']),
+  B('SA_VOLCANO', 'Volcano', 5, 'party', ['Sage']), B('SA_DELUGE', 'Deluge', 5, 'party', ['Sage']), B('SA_VIOLENTGALE', 'Whirlwind', 5, 'party', ['Sage']),
+  B('BD_DRUMBATTLEFIELD', 'Battle Theme', 5, 'party', ['Bard', 'Dancer']), B('BD_RINGNIBELUNGEN', 'Harmonic Lick', 5, 'party', ['Bard', 'Dancer']),
+  B('CR_DEFENDER', 'Defending Aura', 5, 'self', ['Crusader']),
+  Object.assign(B('SA_AUTOSPELL', 'Hindsight', 10, 'self', ['Sage'], 'autospell'), {values: ['MG_NAPALMBEAT', 'MG_COLDBOLT', 'MG_FIREBOLT', 'MG_LIGHTNINGBOLT', 'MG_SOULSTRIKE', 'MG_FIREBALL', 'MG_FROSTDIVER']}),
+  B('BA_ASSASSINCROSS', 'Assassin Cross of Sunset', 10, 'song', ['Bard']), B('BA_POEMBRAGI', 'Poem of Bragi', 10, 'song', ['Bard']),
+  B('BA_APPLEIDUN', 'Apple of Idun', 10, 'song', ['Bard']), B('BA_WHISTLE', 'Perfect Tablature', 10, 'song', ['Bard']),
+  B('DC_HUMMING', 'Humming', 10, 'song', ['Dancer']), B('DC_FORTUNEKISS', "Fortune's Kiss", 10, 'song', ['Dancer']), B('DC_SERVICEFORYOU', 'Service for You', 10, 'song', ['Dancer']),
+  Object.assign(B('ENDOW', 'Weapon endow', 1, 'endow', null, 'element'), {values: ['Water', 'Earth', 'Fire', 'Wind', 'Poison', 'Holy', 'Dark', 'Ghost']}),
+  B('POT_CONCENTRATION', 'Concentration Potion', 1, 'item', null, 'bool'), B('POT_AWAKENING', 'Awakening Potion', 1, 'item', null, 'bool'), B('POT_BERSERK', 'Berserk Potion', 1, 'item', null, 'bool'),
+  B('FOOD_STR', 'STR food', 10, 'item'), B('FOOD_AGI', 'AGI food', 10, 'item'), B('FOOD_VIT', 'VIT food', 10, 'item'),
+  B('FOOD_INT', 'INT food', 10, 'item'), B('FOOD_DEX', 'DEX food', 10, 'item'), B('FOOD_LUK', 'LUK food', 10, 'item')];
+const BUFFBY = Object.fromEntries(BUFFS.map(b => [b.id, b]));
+const SONG_CASTER = {agi: 99, dex: 99, int: 99, vit: 99, luk: 99, lessons: 10};
+const ENDOW_ELE = ['Water', 'Earth', 'Fire', 'Wind', 'Poison', 'Holy', 'Dark', 'Ghost'];
+// Hindsight (SA_AUTOSPELL). cap = skill_autospell maxlv (skill.cpp:10710-10727, pre-re); min = lowest Hindsight level offering the spell
+// (menu thresholds from the monster branch of skills/mage/hindsight.cpp:25-44: Napalm Beat < Lv 2 <= bolts < Lv 5 <= Soul Strike < Lv 8 <= Fire Ball < Lv 10 <= Frost Diver)
+const HINDSIGHT = {MG_NAPALMBEAT: {min: 1, cap: () => 3}, MG_COLDBOLT: {min: 2, cap: l => MN(3, l - 1)}, MG_FIREBOLT: {min: 2, cap: l => MN(3, l - 1)},
+  MG_LIGHTNINGBOLT: {min: 2, cap: l => MN(3, l - 1)}, MG_SOULSTRIKE: {min: 5, cap: l => MN(3, l - 4)}, MG_FIREBALL: {min: 8, cap: l => MN(2, l - 7)}, MG_FROSTDIVER: {min: 10, cap: () => 1}};
+const autospellCap = (lv, spell) => { const h = HINDSIGHT[spell]; return h && lv >= h.min ? h.cap(lv) : 0; };
+const FIELD_ENCHANT = [10, 14, 17, 19, 20];   // status.cpp:10997, 11012, 11026: enchant_eff[(lv - 1) % 5], % more damage of the matching element (battle.cpp:531-551)
+const DELUGE_HP = [5, 9, 12, 14, 15];         // status.cpp:11025 deluge_eff
+
+/* ---------- stat points (pc.cpp:8803 PC_STATUS_POINT_COST pre-renewal, pc_need_status_point) ---------- */
+const statCost = low => 1 + T((low + 9) / 10);                 // cost to raise a stat from `low` to low + 1
+function statPointsUsed(stats) { let sp = 0; for (const k of ST) for (let x = 1; x < (+stats[k] || 1); x++) sp += statCost(x); return sp; }
+
+/* ---------- positions ---------- */
+const HEADLOC = {'Upper Headgear': ['top'], 'Middle Headgear': ['mid'], 'Lower Headgear': ['low'], 'Upper + Middle Headgear': ['top', 'mid'], 'Upper + Lower Headgear': ['top', 'low'],
+  'Middle + Lower Headgear': ['mid', 'low'], 'Upper + Middle + Lower Headgear': ['top', 'mid', 'low']};
+const headCover = item => HEADLOC[item && item.loc] || null;
+const headSlotOf = cov => cov[0] === 'top' ? 'headTop' : cov[0] === 'mid' ? 'headMid' : 'headLow';   // multi-position gear sits in its highest slot
+const CARDSLOT = {weapon: 'Weapon', left: 'Shield', headTop: 'Headgear', headMid: 'Headgear', headLow: 'Headgear', armor: 'Armor', garment: 'Garment', shoes: 'Footgear', acc1: 'Accessory', acc2: 'Accessory'};
+
+const idMapCache = new WeakMap();
+function itemIdMap(D) {
+  let m = idMapCache.get(D.items);
+  if (!m) { m = {}; for (const k in D.items) { const i = D.items[k]; if (i && i.id) m[i.id] = i; } idMapCache.set(D.items, m); }
+  return m;
+}
+
+/* ---------- manual bonuses (build.manual) ---------- */
+const MANUAL_NUM = [['str', 'STR'], ['agi', 'AGI'], ['vit', 'VIT'], ['int', 'INT'], ['dex', 'DEX'], ['luk', 'LUK'], ['allStats', 'All stats'], ['batk', 'ATK'], ['watk', 'Weapon ATK'], ['matk', 'MATK'],
+  ['def', 'DEF'], ['mdef', 'MDEF'], ['hit', 'HIT'], ['flee', 'Flee'], ['flee2', 'Perfect Dodge'], ['cri', 'Critical'], ['maxhp', 'Max HP'], ['maxsp', 'Max SP'], ['maxhpRate', '% Max HP'], ['maxspRate', '% Max SP'],
+  ['aspdRate', '% ASPD'], ['matkRate', '% MATK'], ['castRate', '% cast time'], ['critAtkRate', '% critical damage'], ['longAtkRate', '% ranged damage']];
+const MANUAL_MAP = [['addRace', 'damage to'], ['addEle', 'damage to'], ['addSize', 'damage to'], ['addClass', 'damage to'], ['subRace', 'resistance to'], ['subEle', 'resistance to'], ['skillAtk', 'skill damage']];
+const sgn = n => (n > 0 ? '+' : '') + n;
+// -> {bonus, applied}: the sparse object turned into a Bonus plus readable lines (unknown keys and non-numbers are ignored)
+function manualBonus(m, skillName) {
+  const b = CalcScript.emptyBonus(), applied = [];
+  if (!m || typeof m !== 'object') return {bonus: b, applied};
+  for (const [k, label] of MANUAL_NUM) {
+    const n = Number(m[k]); if (!isFinite(n) || !n) continue;
+    b[k] = n; applied.push(label.charAt(0) === '%' ? `${sgn(n)}${label}` : `${sgn(n)} ${label}`);
+  }
+  for (const [k, what] of MANUAL_MAP) {
+    const src = m[k]; if (!src || typeof src !== 'object') continue;
+    for (const key in src) {
+      const n = Number(src[key]); if (!isFinite(n) || !n) continue;
+      b[k][key] = n;
+      const tail = k === 'addEle' || k === 'subEle' ? key + ' element' : k === 'addSize' ? key + ' size' : k === 'addClass' ? key + ' class' : key;
+      applied.push(k === 'skillAtk' ? `${sgn(n)}% ${skillName ? skillName(key) : key} damage` : `${sgn(n)}% ${what} ${tail}`);
+    }
+  }
+  return {bonus: b, applied};
+}
+
+/* ---------- compute ---------- */
+function compute(build, D) {
+  const CD = D.CALCDATA, job = build.job, J = CD.jobs[job];
+  if (!J) throw new Error('unknown job ' + job);
+  const notes = [], settings = build.settings || {}, rathena = settings.itemSource === 'rathena';
+  const baseLv = clamp(+build.baseLv || 1, 1, 99), jobLv = clamp(+build.jobLv || 1, 1, J.maxJobLv);
+  const bs = {}; for (const k of ST) bs[k] = build.stats && build.stats[k] != null ? +build.stats[k] : 1;
+  const eq = build.equip || {}, learned = build.skills || {};
+  const idMap = itemIdMap(D), itemById = id => idMap[id] || null;
+  const itemOf = e => (e && D.items[e.key]) || null;
+  const lvLearned = id => learned[id] | 0;
+
+  /* --- buffs resolved (levels clamped, true -> max for level buffs) --- */
+  const bf = {}, rawB = build.buffs || {};
+  for (const b of BUFFS) {
+    const v = rawB[b.id];
+    if (b.kind === 'element') { if (ENDOW_ELE.indexOf(v) >= 0) bf[b.id] = v; continue; }
+    if (b.kind === 'autospell') continue;                                            // resolved below, once the learned skills are known
+    if (v === undefined || v === null || v === false || v === 0) continue;
+    if (b.kind === 'bool') { bf[b.id] = true; continue; }
+    const n = v === true ? b.maxLv : clamp(T(+v) || 0, 0, b.maxLv);
+    if (n > 0 || b.kind === 'count') bf[b.id] = n;
+  }
+  const bv = id => typeof bf[id] === 'number' ? bf[id] : 0;
+  const bon = id => !!bf[id];
+  const can = id => ((BUFFBY[id] || {}).jobs || []).indexOf(job) >= 0;           // the job can self-cast the skill
+
+  /* --- equipped keys / helpers for script contexts --- */
+  const equippedKeys = new Set();
+  for (const s of SLOTS) { const e = eq[s]; if (e && e.key) { equippedKeys.add(e.key); for (const c of e.cards || []) if (c) equippedKeys.add(c); } }
+  const covering = which => { for (const s of ['headTop', 'headMid', 'headLow']) { const e = eq[s], c = headCover(itemOf(e)); if (e && c && c.indexOf(which) >= 0) return e; } return null; };
+  const entryOfEqi = n => n === 'EQI_HEAD_TOP' ? covering('top') : n === 'EQI_HEAD_MID' ? covering('mid') : n === 'EQI_HEAD_LOW' ? covering('low') : eq[EQI[n]];
+  const mkCtx = (refine, hand) => ({refine: refine | 0, baseLv, jobLv, job, baseStats: bs, skillLv: lvLearned, isEquipped: k => equippedKeys.has(k),
+    refineOf: n => { const e = entryOfEqi(n); return e ? e.refine | 0 : 0; }, equipIdOf: n => { const e = entryOfEqi(n), i = itemOf(e); return i && i.id || 0; },
+    itemById, mobByMid: D.mobByMid || null, hand: hand || null});
+  const bonusOf = (item, refine, hand) => {
+    const ctx = mkCtx(refine, hand);
+    return rathena && item.ra && item.ra.script ? CalcScript.itemBonusFrom(item, ctx, 'rathena') : CalcScript.itemBonus(item, ctx);
+  };
+
+  /* --- placement of a Bonus by lr_flag (pc.cpp pc_bonus / pc_bonus2 / pc_bonus3) ---
+   * lr 0 = right weapon, armor, accessory, combo, card of a non-left item; 1 = left-hand item's cards and the left weapon script (LR_FLAG_WEAPON);
+   * 2 = left shield item script (LR_FLAG_SHIELD); 3 = ammo (LR_FLAG_ARROW).
+   *  addRace/addEle/addSize/addClass : lr 0 and 2 -> right_weapon, 1 -> left_weapon, 3 -> arrow_add* (pc.cpp:4503-4535)
+   *  addMob (bAddDamageClass)        : pc.cpp:4598 sends every lr_flag != NONE to left_weapon; here lr 0/2/3 -> right bucket, lr 1 -> left
+   *  ignoreDef*, defRatioAtk*, watk (SP_ATK1), watk2 (SP_ATK2): lr 0 -> right, 1 -> left, 2/3 are dropped (pc.cpp:3752-3771, 4016-4094)
+   *  everything else is player-wide, except for ammo where pc_bonus skips it (`lr_flag != LR_FLAG_ARROW`). */
+  const ADD = ['addRace', 'addEle', 'addSize', 'addClass'], RD = ['ignoreDefRace', 'ignoreDefClass', 'defRatioAtkRace', 'defRatioAtkClass', 'watk', 'watk2'];
+  const acc = {main: CalcScript.emptyBonus(), left: CalcScript.emptyBonus(), arrow: CalcScript.emptyBonus()};
+  const eqStat = zero6(), cardStat = zero6();       // param_equip (items + combos) and param_bonus after the memcpy (cards, then SC scripts such as foods)
+  const eleSeq = {right: null, left: null};         // rhw.ele / lhw.ele, last assignment wins (pc_bonus SP_ATKELE, forge code)
+  let arrowHit = 0, arrowCri = 0;
+  const place = (bn, lr, weaponT) => {
+    const rest = CalcScript.addBonus(CalcScript.emptyBonus(), bn);
+    const dAdd = lr === 1 ? acc.left : lr === 3 ? acc.arrow : acc.main;
+    for (const k of ADD) { CalcScript.addBonus(dAdd, {[k]: rest[k]}); rest[k] = {}; }
+    CalcScript.addBonus(lr === 1 ? acc.left : acc.main, {addMob: rest.addMob}); rest.addMob = {};   // rAthena sends lr 2/3 to left_weapon too; kept on the right bucket so left.bonus only holds left weapon + cards
+    const dRd = lr === 0 ? acc.main : lr === 1 ? acc.left : null;
+    for (const k of RD) { if (dRd) CalcScript.addBonus(dRd, {[k]: rest[k]}); rest[k] = typeof rest[k] === 'number' ? 0 : {}; }
+    const ele = rest.atkEle; rest.atkEle = null;
+    if (ele) {
+      if (lr === 1) eleSeq.left = ele;
+      else if (lr === 3) { if (weaponT === 'Bow') eleSeq.right = ele; }     // pc.cpp:3883-3898: bow user -> the arrow element becomes the weapon element
+      else eleSeq.right = ele;
+    }
+    if (lr === 3) { arrowHit += rest.hit; arrowCri += rest.cri; CalcScript.addBonus(acc.main, {critLong: rest.critLong}); return; }
+    CalcScript.addBonus(acc.main, rest);
+  };
+  const addStat = (bn, bucket) => { for (const k of ST) bucket[k] += (bn[k] || 0) + (bn.allStats || 0); };
+
+  const items = [];
+  let defSum = 0, mdefSum = 0, refineDef = 0;
+  const wInfo = {right: null, left: null};
+  const rItem = itemOf(eq.weapon), lItem = itemOf(eq.left);
+  const rType = weaponType(rItem && rItem.type === 'Weapon' ? rItem : null), dualWield = !!(lItem && lItem.type === 'Weapon');
+  const lType = dualWield ? weaponType(lItem) : null;
+  const isForged = e => !!e && (!!e.forgedEle || (e.starCrumbs | 0) > 0);
+
+  /* --- pass 1: equipment scripts (status.cpp:3905-4040) --- */
+  for (const slot of ORDER) {
+    const e = eq[slot], item = itemOf(e);
+    if (!e) continue;
+    if (!item) { notes.push(`Unknown item ${e.key} in ${slot} ignored.`); continue; }
+    const hand = slot === 'weapon' ? 'right' : slot === 'left' && item.type === 'Weapon' ? 'left' : null;
+    const lr = slot === 'left' ? (item.type === 'Weapon' ? 1 : 2) : 0;
+    const refine = clamp(e.refine | 0, 0, 10);
+    defSum += item.def | 0;                                                  // base_status->def += inventory_data->def  (status.cpp:3917)
+    mdefSum += item.mdef | 0;
+    if (item.type === 'Armor') refineDef += CD.refine.armor.bonus[refine] || 0;   // refinedef += info->bonus (status.cpp:4014)
+    if (item.type === 'Weapon') {
+      const wlv = clamp(item.wlv | 0 || 1, 1, 4), tbl = CD.refine.weapon[wlv];
+      wInfo[hand] = {item, wlv, refine, atk: item.atk | 0, refineAtk: tbl.bonus[refine] || 0, overMax: tbl.over[refine] || 0, star: 0, forged: false};
+      if (item.element && item.element !== 'Neutral') eleSeq[hand] = item.element;   // Ep 8 weapon element field (rAthena: the weapon script's bAtkEle)
+    }
+    const r = bonusOf(item, refine, hand);
+    const bn = r.bonus;
+    if (!rathena && item.mhp > 0) bn.maxhp = item.mhp;                          // Ep 8 item MaxHP / MaxSP fields are authoritative (scripts only sometimes repeat them)
+    if (!rathena && item.msp > 0) bn.maxsp = item.msp;
+    addStat(bn, eqStat);
+    place(bn, lr, rType);
+    if (item.type === 'Weapon' && isForged(e)) {                                 // status.cpp:4004-4011 forged weapon: star + element only when none yet
+      const w = wInfo[hand], c = clamp(e.starCrumbs | 0, 0, 3), star = c * 5;
+      w.star = star >= 15 ? 40 : star; w.forged = true; w.crumbs = c;
+      if (!eleSeq[hand] || eleSeq[hand] === 'Neutral') eleSeq[hand] = e.forgedEle && e.forgedEle !== 'Neutral' ? e.forgedEle : eleSeq[hand];
+    }
+    items.push({slot, key: item.key, source: r.source, applied: r.applied, notCalculated: r.notCalculated});
+  }
+  /* --- ammo (status.cpp:4042-4053): arrow_atk, lr_flag ARROW --- */
+  const aE = eq.ammo, aItem = itemOf(aE);
+  let ammo = null;
+  if (aItem) {
+    const r = bonusOf(aItem, 0, null);
+    place(r.bonus, 3, rType);
+    ammo = {key: aItem.key, atk: aItem.atk | 0, element: r.bonus.atkEle || aItem.element || 'Neutral', bonus: r.bonus, hit: 0, cri: 0};
+    items.push({slot: 'ammo', key: aItem.key, source: r.source, applied: r.applied, notCalculated: r.notCalculated});
+  }
+  /* --- combos (status.cpp:4055-4090): all pieces equipped, runs with lr_flag NONE --- */
+  const have = {};
+  for (const k of equippedKeys) have[k] = 0;
+  for (const s of SLOTS) { const e = eq[s]; if (e && e.key) { have[e.key]++; for (const c of e.cards || []) if (c) have[c]++; } }
+  for (const combo of CD.combos || []) {
+    const need = {}; for (const k of combo.items) need[k] = (need[k] || 0) + 1;
+    if (!Object.keys(need).every(k => (have[k] || 0) >= need[k])) continue;
+    const r = CalcScript.runScript(combo.script, mkCtx(0, null));
+    addStat(r.bonus, eqStat); place(r.bonus, 0, rType);
+    items.push({slot: 'combo', key: combo.items.join(' + '), source: 'combo', applied: r.applied, notCalculated: r.notCalculated});
+  }
+  /* --- manual bonuses (build.manual): counted like an equipment script, stats in param_equip --- */
+  if (build.manual && typeof build.manual === 'object') {
+    const mb = manualBonus(build.manual, id => (CD.skills && CD.skills[id] && CD.skills[id].name) || (D.SKT && D.SKT.skills && D.SKT.skills[id] && D.SKT.skills[id].name) || id);
+    if (mb.applied.length) {
+      addStat(mb.bonus, eqStat); place(mb.bonus, 0, rType);
+      items.push({slot: 'manual', key: 'manual', source: 'manual', applied: mb.applied, notCalculated: []});
+    }
+  }
+  /* --- pass 2: cards (status.cpp:4098-4144); forged weapons hold no cards (itemdb_isspecial(card[0])) --- */
+  for (const slot of ORDER) {
+    const e = eq[slot], item = itemOf(e);
+    if (!e || !item || isForged(e)) continue;
+    const lr = slot === 'left' ? 1 : 0;                                          // cards in the left hand item (weapon or shield) run with LR_FLAG_WEAPON
+    (e.cards || []).forEach((ck, i) => {
+      if (!ck) return;
+      const card = D.items[ck];
+      if (!card) { notes.push(`Unknown card ${ck} in ${slot} ignored.`); return; }
+      const r = bonusOf(card, 0, lr === 1 ? 'left' : null);
+      addStat(r.bonus, cardStat);
+      place(r.bonus, lr, rType);
+      items.push({slot: `${slot}:card${i + 1}`, key: card.key, source: r.source, applied: r.applied, notCalculated: r.notCalculated});
+    });
+  }
+  // consumable foods are SC scripts (`bonus bStr, n`) that run after the cards (status.cpp:4196-4201): they count as param_bonus
+  for (const k of ST) cardStat[k] += bv('FOOD_' + k.toUpperCase());
+  // pet bonus script (status.cpp:4205-4212): runs after the SC scripts and pc_bonus_script, so its stats are param_bonus (cardStat) like cards
+  const petB = build.pet && typeof build.pet === 'object' && build.pet.mob ? build.pet : null;
+  if (petB) {
+    const list = D.pets, pet = Array.isArray(list) ? list.find(x => x.mob === petB.mob) : list && list[petB.mob];
+    if (!pet) notes.push(`Unknown pet ${petB.mob} ignored.`);
+    else if (!pet.script) notes.push(`${pet.name || pet.mob} has no stat bonus.`);
+    else if (petB.loyal === false) notes.push('The pet bonus is not counted: the pet is not Loyal.');
+    else if (D.petEquipRequired && petB.acc === false) notes.push('The pet bonus is not counted: this server needs the pet accessory equipped (pet_equip_required).');
+    else {
+      const r = CalcScript.runScript(pet.script, mkCtx(0, null));
+      addStat(r.bonus, cardStat); place(r.bonus, 0, rType);
+      items.push({slot: 'pet', key: pet.mob, source: 'rathena', applied: r.applied, notCalculated: r.notCalculated});
+      notes.push('Pet bonuses assume Loyal intimacy.');
+    }
+  }
+
+  if (rType === 'Bow') CalcScript.addBonus(acc.main, {addRace: acc.arrow.addRace, addEle: acc.arrow.addEle, addSize: acc.arrow.addSize, addClass: acc.arrow.addClass});   // battle.cpp:943 arrow_add* count when arrow_atk (bow)
+  const main = acc.main;
+  /* --- skills: learned + item-granted, max of both --- */
+  const skills = Object.assign({}, learned);
+  for (const g of main.grantSkills) if (g && g.id) skills[g.id] = MX(skills[g.id] | 0, g.lv | 0);
+  const sk = id => skills[id] | 0;
+
+  /* --- mount / falcon / armor element / Hindsight (resolved here, read by battle through the Status) --- */
+  const riding = !!settings.riding && sk('KN_RIDING') > 0;                        // pc_isriding needs the Peco Peco; max weight check also tests KN_RIDING (status.cpp:3680)
+  if (settings.riding && !riding) notes.push('Mounted is set, but Peco Peco Riding is not learned: riding is ignored.');
+  const falcon = !!settings.falcon && job === 'Hunter' && sk('HT_FALCON') > 0;
+  if (settings.falcon && !falcon) notes.push(job === 'Hunter' ? 'A falcon needs Falconry Mastery: the falcon is ignored.' : 'Only Hunters can have a falcon: the falcon is ignored.');
+  const armorEle = main.defEle || 'Neutral';                                      // status->def_ele: bDefEle (last wins), read by SC_VOLCANO / VIOLENTGALE / DELUGE at start (status.cpp:10996-11028)
+  const hsRaw = rawB.SA_AUTOSPELL;
+  if (hsRaw && typeof hsRaw === 'object' && (hsRaw.lv | 0) > 0) {
+    const lv = clamp(T(+hsRaw.lv) || 0, 1, BUFFBY.SA_AUTOSPELL.maxLv), spell = hsRaw.skill, cap = autospellCap(lv, spell);
+    const nm = (CD.skills[spell] || {}).name || spell;
+    if (!HINDSIGHT[spell]) notes.push(`Hindsight cannot cast ${spell}: not in the spell list.`);
+    else if (!cap) notes.push(`Hindsight Lv ${lv} cannot cast ${nm} (needs Lv ${HINDSIGHT[spell].min}): ignored.`);
+    else {
+      const learnedLv = sk(spell), spellLv = learnedLv > 0 ? MN(learnedLv, cap) : cap;     // skill.cpp:10729: maxlv = min(learned, cap)
+      if (!learnedLv) notes.push(`${nm} is not learned: Hindsight uses its cap (Lv ${cap}); the real skill_autospell refuses unlearned spells.`);
+      bf.SA_AUTOSPELL = {lv, skill: spell, cap, spellLv, known: learnedLv > 0};
+    }
+  }
+
+  /* --- passive skills that act on the bonus buckets (status.cpp:4676-4693) --- */
+  if (sk('CR_TRUST')) CalcScript.addBonus(main, {subEle: {Holy: sk('CR_TRUST') * 5}});
+  if (sk('BS_SKINTEMPER')) CalcScript.addBonus(main, {subEle: {Neutral: sk('BS_SKINTEMPER'), Fire: sk('BS_SKINTEMPER') * 5}});
+  if (sk('SA_DRAGONOLOGY')) {
+    const l = sk('SA_DRAGONOLOGY');
+    // left_cardfix_to_right = yes (conf/battle/player.conf:20) so the left_weapon copy is not added (status.cpp:4688)
+    CalcScript.addBonus(main, {addRace: {Dragon: l * 4}, magicAddRace: {Dragon: l * 2}, subRace: {Dragon: l * 4}});
+  }
+  if (bon('SM_MAGNUM')) { /* battle-side */ }
+  if (bon('BS_WEAPONPERFECT')) main.noSizeFix = true;                              // SC_WEAPONPERFECTION: battle.cpp:2487 / 4151 BDMG_NOSIZE
+
+  /* --- base stats (status.cpp:4248-4314) --- */
+  const jb = J.jobBonus[MN(jobLv, J.jobBonus.length) - 1] || [0, 0, 0, 0, 0, 0];
+  const b = {};
+  ST.forEach((k, i) => { b[k] = bs[k] + jb[i]; });
+  if (job === 'Supernovice' && jobLv >= 70) { for (const k of ST) b[k] += 10; notes.push('Super Novice at job level 70+ gets +10 to all stats (assumes the character never died).'); }
+  if (sk('BS_HILTBINDING') > 0) b.str += 1;
+  if (sk('SA_DRAGONOLOGY') > 0) b.int += T((sk('SA_DRAGONOLOGY') + 1) / 2);
+  if (sk('AC_OWL') > 0) b.dex += sk('AC_OWL');
+  for (const k of ST) b[k] = clamp(b[k] + eqStat[k] + cardStat[k], 0, 65535);
+
+  /* --- battle stats: status_calc_str..luk (status.cpp:6752-7166), SC order as in the source --- */
+  const s = Object.assign({}, b);
+  if (bv('AC_CONCENTRATION')) {          // SC_CONCENTRATE first: % of the stat without card/SC-script bonuses (val3/val4 = param_bonus agi/dex), status.cpp:6836, 7048, 11577
+    const v2 = 2 + bv('AC_CONCENTRATION');
+    s.agi += T((s.agi - cardStat.agi) * v2 / 100); s.dex += T((s.dex - cardStat.dex) * v2 / 100);
+  }
+  if (bon('MC_LOUD')) s.str += 4;                                                  // status.cpp:6769
+  if (bv('AL_BLESSING')) { s.str += bv('AL_BLESSING'); s.int += bv('AL_BLESSING'); s.dex += bv('AL_BLESSING'); }   // val2 = val1 for players (11568)
+  if (bv('AL_INCAGI')) s.agi += 2 + bv('AL_INCAGI');                               // val2 = 2 + val1 (10854)
+  if (bv('PR_GLORIA')) s.luk += 30;                                                // status.cpp:7129
+  for (const k of ST) s[k] = clamp(s[k], 0, 65535);
+
+  /* --- songs: group values from skill_unitsetting (skill.cpp:5906-5965), caster stats from SONG_CASTER --- */
+  const sc = Object.assign({}, SONG_CASTER, rawB.SONG_CASTER || {});
+  const L = sc.lessons | 0;
+  const song = {};
+  if (bv('BA_WHISTLE')) song.whistle = {flee: bv('BA_WHISTLE') + T(sc.agi / 10) + T(L / 2), flee2: T((bv('BA_WHISTLE') + 1) / 2) + T(sc.luk / 30) + T(L / 5)};
+  if (bv('DC_HUMMING')) song.humming = {hit: 1 + 2 * bv('DC_HUMMING') + T(sc.dex / 10) + L};
+  if (bv('BA_POEMBRAGI')) { const l = bv('BA_POEMBRAGI'); song.bragi = {cast: 3 * l + T(sc.dex / 10) + L, delay: (l < 10 ? 3 * l : 50) + T(sc.int / 5) + 2 * L}; }
+  if (bv('BA_ASSASSINCROSS')) song.cross = {aspd: (T(L / 2) + 5 + bv('BA_ASSASSINCROSS') + T(sc.agi / 20)) * 10};
+  if (bv('DC_FORTUNEKISS')) song.fortune = {cri: (10 + bv('DC_FORTUNEKISS') + T(sc.luk / 10)) * 10 + 5 * L};
+  if (bv('DC_SERVICEFORYOU')) { const l = bv('DC_SERVICEFORYOU'); song.service = {sp: 15 + l + T(sc.int / 10) + T(L / 2), cost: 20 + 3 * l + T(sc.int / 10) + T(L / 2)}; }
+  if (bv('BA_APPLEIDUN')) song.idun = {hp: 5 + 2 * bv('BA_APPLEIDUN') + T(sc.vit / 10) + T(L / 2)};     // status.cpp:12504 (caster VIT)
+
+  /* --- weapon ATK / refine per hand --- */
+  const impo = bv('PR_IMPOSITIO') * 5;                                             // SC_IMPOSITIO val2 = 5 * lv, status_calc_watk: watk += val2 (7348), both hands
+  // SC_DRUMBATTLE val2 = (lv + 1) * 25 (skill.cpp:5967), SC_NIBELUNGEN val2 = (lv + 2) * 25 (5971); pre-re status_calc_watk 7345, 7359-7368: Drum adds to
+  // every hand, Nibelungen only to a hand holding a level 4 weapon. Both are added to the weapon ATK like Impositio (before bWeaponAtkRate).
+  const drumAtk = bv('BD_DRUMBATTLEFIELD') ? (bv('BD_DRUMBATTLEFIELD') + 1) * 25 : 0, nibAtk = bv('BD_RINGNIBELUNGEN') ? (bv('BD_RINGNIBELUNGEN') + 2) * 25 : 0;
+  const hands = {};
+  for (const h of ['right', 'left']) {
+    const w = wInfo[h], bn = h === 'right' ? main : acc.left;
+    if (h === 'left' && !w) { hands.left = null; continue; }
+    hands[h] = {w, watk: (w ? w.atk : 0) + (bn.watk | 0) + impo + drumAtk + (nibAtk && w && w.wlv === 4 ? nibAtk : 0), refineAtk: (w ? w.refineAtk : 0) + (bn.watk2 | 0), overMax: w ? w.overMax : 0};
+  }
+  if (nibAtk && !((wInfo.right && wInfo.right.wlv === 4) || (wInfo.left && wInfo.left.wlv === 4))) notes.push('Harmonic Lick (Ring of Nibelungen) only adds ATK to a level 4 weapon in pre-renewal (status.cpp:7359-7368); no level 4 weapon is equipped.');
+  if (bv('BD_DRUMBATTLEFIELD') || nibAtk) notes.push('Ensembles do not affect the two performers themselves (skill.cpp:6546-6551): the bonus is for another player standing in the area.');
+
+  /* --- element resolution: endow > forged/script/ammo > Neutral (status_calc_attack_element, status.cpp:8836) --- */
+  const endowEle = (() => {
+    const e = bf.ENDOW;
+    if (e && ['Water', 'Earth', 'Fire', 'Wind'].indexOf(e) >= 0) return e;
+    if (bv('AS_ENCHANTPOISON')) return 'Poison';
+    if (bv('PR_ASPERSIO')) return 'Holy';
+    return e || null;                                                                // Dark (shadow weapon), Ghost, Holy, Poison
+  })();
+  const eleOf = h => endowEle || eleSeq[h] || 'Neutral';
+
+  /* --- derived stats --- */
+  const weaponIdx = clamp(baseLv, 1, 99) - 1;
+  const ranged = isRanged(rType);
+  const baseAtk = st => { const a = ranged ? st.dex : st.str, c = ranged ? st.str : st.dex; return clamp(a + T(a / 10) * T(a / 10) + T(c / 5) + T(st.luk / 5), 0, 65535); };   // status.cpp:2424
+  // Sage fields (SC_VOLCANO / VIOLENTGALE / DELUGE, status.cpp:10994-11034): the ATK / FLEE / HP part only works with the matching armor element (val2 = 0 otherwise);
+  // the val3 enchant (+% damage of that element, battle.cpp:531-551) always applies and is read by battle from status.buffs.
+  const fieldOk = ele => armorEle === ele;
+  const volcanoAtk = bv('SA_VOLCANO') && fieldOk('Fire') ? bv('SA_VOLCANO') * 10 : 0;                             // val2 = val1 * 10 (pre-re), status_calc_batk 7300
+  const galeFlee = bv('SA_VIOLENTGALE') && fieldOk('Wind') ? bv('SA_VIOLENTGALE') * 3 : 0;                      // val2 = val1 * 3, status_calc_flee 7637
+  const delugeHp = bv('SA_DELUGE') && fieldOk('Water') ? DELUGE_HP[(bv('SA_DELUGE') - 1) % 5] : 0;              // val2 = deluge_eff[], status_get_hpbonus 3204
+  for (const [id, ele, nm, what] of [['SA_VOLCANO', 'Fire', 'Volcano', 'ATK'], ['SA_VIOLENTGALE', 'Wind', 'Whirlwind', 'FLEE'], ['SA_DELUGE', 'Water', 'Deluge', 'Max HP']])
+    if (bv(id) && !fieldOk(ele)) notes.push(`${nm}: the ${what} bonus needs ${ele} armor element (yours: ${armorEle}); only the ${ele} damage enchant (+${FIELD_ENCHANT[(bv(id) - 1) % 5]}%) applies.`);
+  if (bv('SA_VOLCANO')) notes.push('Volcano also blocks Ice Wall (status.cpp:2194).');
+  if (bv('SA_VIOLENTGALE')) notes.push('Whirlwind makes a Fire Wall last 50% longer (skill.cpp:5792).');
+  const batk = clamp(baseAtk(s) + main.batk + (sk('BS_HILTBINDING') > 0 ? 4 : 0) + volcanoAtk, 0, 65535);          // status.cpp:5966, 4339-4345
+  const matkRateMul = MX(0, 100 + main.matkRate);
+  let matkMin = s.int + T(s.int / 7) * T(s.int / 7) + main.matk, matkMax = s.int + T(s.int / 5) * T(s.int / 5) + main.matk;   // status.cpp:2511, 6241-6249
+  if (matkRateMul !== 100) { matkMin = T(matkMin * matkRateMul / 100); matkMax = T(matkMax * matkRateMul / 100); }
+  matkMin = clamp(matkMin, 0, 65535); matkMax = clamp(matkMax, 0, 65535);
+
+  // HIT / FLEE / CRI / FLEE2: base (b_status) first, then the battle-stat delta, then the SC bonuses (status_calc_misc 2705-2740, 4416-4524, 6004-6158)
+  const hitRate = MX(0, 100 + main.hitRate), fleeRate = MX(0, 100 + main.fleeRate);
+  let hit0 = clamp(main.hit + baseLv + b.dex, 1, 32767);
+  if (hitRate !== 100) hit0 = T(hit0 * hitRate / 100);
+  hit0 += sk('BS_WEAPONRESEARCH') * 2 + sk('AC_VULTURE');                          // 4482-4491 (pre-renewal)
+  let hit = clamp(hit0 + (s.dex - b.dex) + (song.humming ? song.humming.hit : 0), 1, 32767);
+  let flee0 = clamp(main.flee + baseLv + b.agi, 1, 32767);
+  if (fleeRate !== 100) flee0 = T(flee0 * fleeRate / 100);
+  flee0 += sk('TF_MISS') * ((job === 'Assassin' || job === 'Rogue') ? 4 : 3);      // 4517: 4/lv for 2nd-class thieves
+  flee0 += T(sk('MO_DODGE') * 3 / 2);                                              // 4519
+  const flee = clamp(flee0 + (s.agi - b.agi) + (song.whistle ? song.whistle.flee : 0) + galeFlee, 1, 32767);
+  const cri0 = clamp(main.cri * 10 + 10 + T(b.luk * 10 / 3), 1, 32767);            // 2729 (pre-renewal: 10 + luk*10/3); bCritical adds val * 10 (pc.cpp:3838)
+  let criI = cri0 + T((s.luk - b.luk) * 10 / 3);
+  if (bv('MO_EXPLOSIONSPIRITS')) criI += 75 + 25 * bv('MO_EXPLOSIONSPIRITS');      // 7509, 11128
+  if (song.fortune) criI += song.fortune.cri;                                       // 7511
+  criI = clamp(criI, 10, 32767);
+  const katar = rType === 'Katar';
+  const flee2I = clamp(clamp(main.flee2 * 10 + b.luk + 10, 0, 32767) + (s.luk - b.luk) + (song.whistle ? song.whistle.flee2 : 0), 10, 32767);   // 2737, 7729: whistle adds its raw value
+
+  // DEF: item def + refine (sum then (x+50)/100) + bDef, then bDefRate, cap max_def 99 (status.cpp:4096, 4576-4590); SC: Steel Body = 90 (7762)
+  let defV = defSum + T((refineDef + 50) / 100) + main.def;
+  const defRate = MX(0, 100 + main.defRate);
+  if (defRate !== 100) defV = T(defV * defRate / 100);
+  defV = MN(99, defV);
+  const drumDef = bv('BD_DRUMBATTLEFIELD') ? (bv('BD_DRUMBATTLEFIELD') + 1) * 2 : 0;                              // skill.cpp:5967 val2 = (lv + 1) * 2 -> SC_DRUMBATTLE val3, status_calc_def 7774
+  if (bon('MO_STEELBODY')) defV = 90; else defV = MN(127, defV + drumDef);          // Steel Body returns 90 before the SC bonuses (7762); signed char defType caps at 127 (const.hpp is not in the local copy)
+  // DEF2 = VIT (+ delta of battle VIT), bDef2Rate; Angelus +5*lv %, Provoke -(5+5*lv) % (status.cpp:2713, 6041-6056, 7879-7891)
+  const def2Rate = MX(0, 100 + main.def2Rate);
+  let def2 = clamp(b.vit, 0, 32767);
+  if (def2Rate !== 100) def2 = T(def2 * def2Rate / 100);
+  def2 = clamp(def2 + (s.vit - b.vit), 1, 32767);
+  if (bv('AL_ANGELUS')) def2 += T(def2 * 5 * bv('AL_ANGELUS') / 100);
+  const provLv = MX(bv('SM_PROVOKE'), bon('SM_AUTOBERSERK') ? 10 : 0);              // Auto Berserk starts an infinite Provoke Lv 10 below 25% HP (status.cpp:14222)
+  if (provLv) def2 -= T(def2 * (5 + 5 * provLv) / 100);                            // 11668: val3 = 5 + 5 * lv; players keep their hard DEF (7804)
+  def2 = clamp(def2, 1, 32767);
+  // MDEF: item mdef + bMdef, cap 99; Endure +lv; Steel Body 90 (4603-4608, 7931-7947)
+  let mdef = MN(99, mdefSum + main.mdef);
+  if (bon('MO_STEELBODY')) mdef = 90; else if (bv('SM_ENDURE')) mdef += bv('SM_ENDURE');
+  mdef = clamp(mdef, -128, 127);
+  const mdef2 = clamp(clamp(b.int + T(b.vit / 2), 0, 32767) + (s.int - b.int) + T((s.vit - b.vit) / 2), 1, 32767);                     // 2718, 6073-6078
+
+  // MaxHP / MaxSP (status_calc_maxhp_pc / maxsp_pc, status.cpp:3511-3604; hpbonus 3138-3262, spbonus 3298-3389)
+  const maxOf = (tbl, stat, equipStat, fix, equipRate, rate) => {
+    let d = tbl[weaponIdx]; if (stat > 0) d *= 1 + stat * 0.01;
+    d += equipStat; d += fix; d += d * equipRate / 100;
+    d += T(d * rate / 100);
+    return d < 1 ? 1 : T(d);
+  };
+  const maxhp = maxOf(J.hp, s.vit, eqStat.vit, main.maxhp + sk('CR_TRUST') * 200, MX(-100, main.maxhpRate), MX(-100, (song.idun ? song.idun.hp : 0) + delugeHp));
+  const maxsp = maxOf(J.sp, s.int, eqStat.int, main.maxsp, MX(-100, main.maxspRate), MX(-100, sk('HW_SOULDRAIN') * 2 + sk('HP_MEDITATIO') + (song.service ? song.service.sp : 0)));
+
+  /* --- ASPD (status_base_amotion_pc 2401-2414, status_calc_aspd_rate 8406-8539, bl_main 6389-6417) --- */
+  const aspdTbl = J.aspd;
+  const baseAspd = t => { if (aspdTbl[t] != null) return aspdTbl[t]; notes.push(`${jobDisplay(job)} has no ASPD value for ${t}; using Fist.`); return aspdTbl.Fist; };
+  let amo = dualWield ? T((baseAspd(rType) + baseAspd(lType)) * 7 / 10) : baseAspd(rType);
+  amo -= T(amo * (4 * s.agi + s.dex) / 1000);
+  amo -= 10 * main.aspd;                                                             // bAspd: aspd_add -= 10 * val
+  let rate = 1000 - 10 * main.aspdRate;                                              // bAspdRate: base_status->aspd_rate -= 10 * val (pc.cpp:3979)
+  if (sk('SA_ADVANCEDBOOK') > 0 && rType === 'Book') rate -= 5 * sk('SA_ADVANCEDBOOK');   // status.cpp:4625
+  if (riding) rate += 500 - 100 * sk('KN_CAVALIERMASTERY');                          // status.cpp:4632: pc_isriding -> aspd_rate += 500 - 100 * KN_CAVALIERMASTERY (5 = no penalty, 0 = 50% slower)
+  const haste = [];                                                                  // skills: only the strongest applies (8413-8468)
+  const hasteSkill = (id, val, okTypes, why) => {
+    if (!bv(id) && !bon(id)) return;
+    if (okTypes && okTypes.indexOf(rType) < 0) { notes.push(`${BUFFBY[id].name} needs ${why}; it is not counted.`); return; }
+    haste.push({id, val});
+  };
+  hasteSkill('KN_TWOHANDQUICKEN', 300, ['2hSword'], 'a two-handed sword');         // 11052: val2 = 300
+  hasteSkill('KN_ONEHAND', 300, ['1hSword'], 'a one-handed sword');
+  hasteSkill('CR_SPEARQUICKEN', 200 + 10 * bv('CR_SPEARQUICKEN'), ['2hSpear'], 'a two-handed spear');   // 11061
+  if (bv('BS_ADRENALINE')) hasteSkill('BS_ADRENALINE', can('BS_ADRENALINE') ? 300 : 200, ['1hAxe', '2hAxe', 'Mace'], 'an axe or a mace');   // 11603: self 300, party 200
+  if (bv('BS_ADRENALINE2')) hasteSkill('BS_ADRENALINE2', can('BS_ADRENALINE2') ? 300 : 200, rType === 'Bow' ? [] : null, 'a non-bow weapon');
+  if (song.cross && !ranged && rType !== 'Bow') haste.push({id: 'BA_ASSASSINCROSS', val: song.cross.aspd});   // 8453-8467: not with bows
+  let hasteVal = 0; for (const h of haste) hasteVal = MX(hasteVal, h.val);
+  rate -= hasteVal;
+  const pot = bon('POT_BERSERK') ? 200 : bon('POT_AWAKENING') ? 150 : bon('POT_CONCENTRATION') ? 100 : 0;   // SC_ASPDPOTION0..2: val2 = 50 * (2 + n) (11135), stacks with the skill
+  rate -= pot;
+  if (bon('MO_STEELBODY')) rate += 250;                                              // 8491
+  const defender = bv('CR_DEFENDER') > 0 && !!(lItem && lItem.type === 'Armor');
+  if (bv('CR_DEFENDER') && !defender) notes.push('Defending Aura needs a shield (pc.cpp:7458-7461 ends it without one): not counted.');
+  const defLv = defender ? bv('CR_DEFENDER') : 0;
+  if (defender) rate += 250 - 50 * defLv;                                            // 8493: SC_DEFENDER val4 = 250 - 50 * lv (11318)
+  rate = clamp(rate, 0, 32767);
+  let amotion = T(amo * rate / 1000);
+  amotion = clamp(amotion, 100, 4000);                                               // max_aspd 190 -> 100 (battle.cpp:8965), MIN_ASPD 8000 / 2
+  const adelay = amotion * 2, aspd = (2000 - amotion) / 10;
+
+  /* --- cast / delay (skill_castfix 10122-10190, skill_castfix_sc 10205-10220, skill_delayfix 10462-10490) --- */
+  const castrate = MX(0, 100 + main.castRate);                                      // sd->castrate (bCastrate adds)
+  let castRate = MX(0, castrate - (song.bragi ? song.bragi.cast : 0));
+  if (bv('PR_SUFFRAGIUM')) castRate = castRate * (100 - 15 * bv('PR_SUFFRAGIUM')) / 100;   // 11791 (pre-renewal val2 = 15 * lv)
+  const delayRed = (song.bragi ? song.bragi.delay : 0) - main.delayRate;           // bDelayRate: bonus.delayrate -= val
+  const delayRate = MX(0, 100 - MN(delayRed, 100));
+  const spCostRate = MX(0, 100 + main.useSpRate - (song.service ? song.service.cost : 0));   // dsprate (status.cpp:4662)
+
+  /* --- natural regeneration (status_calc_regen 5264-5372, status_calc_regen_rate 5377-5509, status_natural_heal 15444-15640) --- */
+  const regen = (() => {
+    const HP_IV = 6000, SP_IV = 8000, SK_IV = 10000;                                // conf/battle/player.conf:57, 60, 63 (battle.cpp:8387-8389 defaults)
+    const hpRec = MX(0, 100 + main.hpRegenRate), spRec = MX(0, 100 + main.spRegenRate);   // sd->hprecov_rate / sprecov_rate start at 100 (3788), bHPrecovRate adds (pc.cpp:3986), min 0 (4670)
+    let hp = T(s.vit / 5) + MX(1, T(maxhp / 200));                                  // 5276
+    if (hpRec !== 100) hp = T(hp * hpRec / 100);
+    hp = clamp(hp, 0, 32767);                                                       // players: min 0 (5281-5283)
+    let sp = 1 + T(s.int / 6) + T(maxsp / 100);                                     // 5285
+    if (s.int >= 120) sp += T((s.int - 120) / 2) + 4;
+    if (spRec !== 100) sp = T(sp * spRec / 100);
+    sp = clamp(sp, 0, 32767);
+    if (sk('HP_MEDITATIO') > 0) sp = clamp(T(sp * (100 + 3 * sk('HP_MEDITATIO')) / 100), 1, 32767);   // 5295-5298
+    const rn = [];
+    const spRate = bv('PR_MAGNIFICAT') ? 200 : 100;                                 // SC_MAGNIFICAT: regen->rate.sp += 100 (5439); the skill regen (sregen) rate stays 100
+    const hpIv = HP_IV, spIv = T(SP_IV / (spRate / 100));                           // status_natural_heal 15548, 15583: interval = base / (rate / 100 * multi), multi 1 standing
+    // skill regen (sregen): SM_RECOVERY / MG_SRECOVERY (5305-5322), runs every natural_heal_skill_interval, not while walking
+    const skillHp = sk('SM_RECOVERY') > 0 ? sk('SM_RECOVERY') * 5 + T(sk('SM_RECOVERY') * maxhp / 500) : 0;
+    const skillSp = sk('MG_SRECOVERY') > 0 ? sk('MG_SRECOVERY') * 3 + T(sk('MG_SRECOVERY') * maxsp / 500) : 0;
+    // sitting skill regen (ssregen): MO_SPIRITSRECOVERY (5328-5343), only sitting (status_natural_heal 15506: vd->dead_sit == 2), no sphere condition in the source
+    const sr = sk('MO_SPIRITSRECOVERY');
+    const sitHp = sr > 0 ? sr * 4 + T(sr * maxhp / 500) : 0, sitSp = sr > 0 ? sr * 2 + T(sr * maxsp / 500) : 0;
+    // no natural SP regen: Maximize Power, and a Monk in Fury (5421-5428)
+    const spBlocked = bon('BS_MAXIMIZE') || (job === 'Monk' && bv('MO_EXPLOSIONSPIRITS') > 0);
+    if (spBlocked) rn.push(bon('BS_MAXIMIZE') ? 'Maximize Power stops natural SP regeneration (status.cpp:5421).' : 'Fury stops natural SP regeneration for a Monk (status.cpp:5421-5424).');
+    rn.push('Intervals: HP 6000 ms, SP 8000 ms, skill regeneration 10000 ms (conf/battle/player.conf:57-63); the server ticks on a 500 ms grid.');
+    rn.push('Standing still is assumed, not sitting. Sitting halves the HP and SP intervals (status.cpp:15548); the sitting-only skill regeneration is listed as sitHp / sitSp.');
+    rn.push('No natural regeneration at 50% weight or more (battle.cpp:8394 natural_heal_weight_rate, pre-renewal).');
+    rn.push('Skill regeneration (Increase HP / SP Recovery) pauses while walking (status.cpp:15525).');
+    if (bv('PR_MAGNIFICAT')) rn.push('Magnificat doubles the natural SP regeneration rate (status.cpp:5439): SP interval 4000 ms; it does not affect the skill regeneration.');
+    if (sk('SM_MOVINGRECOVERY') > 0) rn.push('Moving HP-Recovery: natural HP regeneration also runs while walking, at half speed (status.cpp:4653, 15529, 15547). Not included in hp / hpInterval.');
+    else rn.push('Without Moving HP-Recovery there is no natural HP regeneration while walking.');
+    if (sr > 0) rn.push('Spiritual Cadence (Spirits Recovery): HP / SP every 10000 ms while sitting; the source has no spirit sphere condition.');
+    if (hpRec !== 100 || spRec !== 100) rn.push(`Item recovery rates: HP ${hpRec}%, SP ${spRec}% (bHPrecovRate / bSPrecovRate).`);
+    return {hp, hpInterval: hpIv, sp: spBlocked ? 0 : sp, spInterval: spIv, skillHp, skillHpInterval: SK_IV, skillSp, skillSpInterval: SK_IV, sitHp, sitSp, sitInterval: SK_IV, spBlocked, notes: rn};
+  })();
+
+  /* --- Status --- */
+  const out = {};
+  const stat = k => ({base: bs[k], bonus: s[k] - bs[k], total: s[k]});
+  const hand = (h) => {
+    const x = hands[h]; if (!x) return null;
+    const w = x.w, bn = h === 'right' ? CalcScript.addBonus(CalcScript.emptyBonus(), main) : CalcScript.addBonus(CalcScript.emptyBonus(), acc.left);
+    return {type: h === 'right' ? rType : lType, wlv: w ? w.wlv : 0, watk: x.watk, refineAtk: x.refineAtk, overMax: x.overMax, element: eleOf(h),
+      starCrumbs: w && w.forged ? w.crumbs : 0, star: w ? w.star : 0, forged: !!(w && w.forged), bonus: bn};
+  };
+  Object.assign(out, {job, baseLv, jobLv});
+  for (const k of ST) out[k] = stat(k);
+  Object.assign(out, {statPointsUsed: statPointsUsed(bs), statPointsTotal: CD.statPoints[baseLv - 1], maxhp, maxsp, batk});
+  out.right = hand('right'); out.left = hand('left');
+  out.shield = !!(lItem && lItem.type === 'Armor');
+  out.shieldItem = out.shield ? {key: lItem.key, refine: clamp(eq.left.refine | 0, 0, 10), weight: lItem.weight | 0} : null;
+  out.dualWield = dualWield; out.twoHanded = !!(rItem && rItem.loc === 'Two-handed Weapon');
+  if (ammo) { ammo.hit = arrowHit; ammo.cri = arrowCri; }
+  out.ammo = ammo;
+  const mainOut = CalcScript.addBonus(CalcScript.emptyBonus(), main);
+  Object.assign(out, {matkMin, matkMax, def: defV, def2, mdef, mdef2, hit, flee, flee2: flee2I / 10, cri: clamp(katar ? criI * 2 : criI, 10, 32767) / 10, criBase: criI / 10, amotion, adelay, aspd, castRate, delayRate, spCostRate,
+    atkRate: 100 + (provLv ? 2 + 3 * provLv : 0),   // battle_get_atkpercent (battle.cpp:4355): Provoke / Auto Berserk only; bAtkRate stays in bonus
+    matkRate: matkRateMul, critAtkRate: main.critAtkRate, longAtkRate: main.longAtkRate, bonus: mainOut, skills});
+  // status.cpp:6147-6150: katar doubles the crit inside status, so `cri` already includes it (criBase = without)
+  const echo = {};
+  for (const id in bf) echo[id] = bf[id];
+  if (['BA_WHISTLE', 'DC_HUMMING', 'BA_POEMBRAGI', 'BA_ASSASSINCROSS', 'DC_FORTUNEKISS', 'DC_SERVICEFORYOU', 'BA_APPLEIDUN'].some(id => bf[id])) echo.SONG_CASTER = sc;
+  out.buffs = echo;
+  out.buffInfo = {haste: hasteVal, hasteFrom: haste.filter(h => h.val === hasteVal).map(h => h.id), potion: pot, aspdRate: rate, endow: endowEle, provoke: provLv,
+    overthrust: bv('BS_OVERTHRUST') ? {self: can('BS_OVERTHRUST'), power: can('BS_OVERTHRUST') ? 5 * bv('BS_OVERTHRUST') : 5} : null,   // 11599: val3 = self ? 5 * lv : 5
+    adrenaline: bv('BS_ADRENALINE') ? {self: can('BS_ADRENALINE')} : null, songs: song,
+    volcano: bv('SA_VOLCANO') ? {lv: bv('SA_VOLCANO'), atk: volcanoAtk, enchant: FIELD_ENCHANT[(bv('SA_VOLCANO') - 1) % 5], armorOk: fieldOk('Fire')} : null,
+    gale: bv('SA_VIOLENTGALE') ? {lv: bv('SA_VIOLENTGALE'), flee: galeFlee, enchant: FIELD_ENCHANT[(bv('SA_VIOLENTGALE') - 1) % 5], armorOk: fieldOk('Wind')} : null,
+    deluge: bv('SA_DELUGE') ? {lv: bv('SA_DELUGE'), hpRate: delugeHp, enchant: FIELD_ENCHANT[(bv('SA_DELUGE') - 1) % 5], armorOk: fieldOk('Water')} : null,
+    drum: drumAtk ? {atk: drumAtk, def: drumDef} : null, nibelungen: nibAtk ? {atk: nibAtk, hands: ['right', 'left'].filter(h => wInfo[h] && wInfo[h].wlv === 4)} : null,
+    defender: defender ? {longReduction: 5 + 15 * defLv, aspdPenalty: (250 - 50 * defLv) / 10} : null};   // 11317: val2 = 5 + 15 * lv (% less BF_LONG|BF_WEAPON damage taken, battle.cpp:1832-1839)
+  out.riding = riding; out.falcon = falcon; out.armorEle = armorEle; out.regen = regen;
+  out.items = items; out.notes = notes;
+  if (out.twoHanded && lItem) notes.push('A two-handed weapon cannot be combined with a left-hand item.');
+  return out;
+}
+
+/* ---------- validate ---------- */
+function validate(build, D) {
+  const CD = D.CALCDATA, P = [], job = build.job, J = CD.jobs[job];
+  if (!J) return ['Unknown job ' + job];
+  const baseLv = build.baseLv | 0, jobLv = build.jobLv | 0;
+  if (baseLv < 1 || baseLv > 99) P.push(`Base level ${baseLv} is outside 1..99.`);
+  if (jobLv < 1 || jobLv > J.maxJobLv) P.push(`Job level ${jobLv} is outside 1..${J.maxJobLv} for ${jobDisplay(job)}.`);
+  const st = build.stats || {};
+  for (const k of ST) { const v = st[k]; if (!(v >= 1 && v <= 99) || v !== T(v)) P.push(`${k.toUpperCase()} ${v} is outside 1..99.`); }
+  const used = statPointsUsed(st), total = CD.statPoints[clamp(baseLv, 1, 99) - 1];
+  if (used > total) P.push(`Stat points: ${used} used, only ${total} available at base level ${baseLv}.`);
+  const eq = build.equip || {}, sex = job === 'Bard' ? 'Male' : job === 'Dancer' ? 'Female' : (build.settings && build.settings.sex) || null;
+  const itemOf = e => (e && D.items[e.key]) || null;
+  const nm = (s, i) => `${s} (${i.name || i.key})`;
+  const rItem = itemOf(eq.weapon), lItem = itemOf(eq.left);
+  for (const slot of SLOTS) {
+    const e = eq[slot]; if (!e) continue;
+    const item = D.items[e.key];
+    if (!item) { P.push(`${slot}: unknown item ${e.key}.`); continue; }
+    const tag = nm(slot, item);
+    // position
+    const loc = item.loc;
+    let fits = false;
+    if (slot === 'weapon') fits = item.type === 'Weapon' && (loc === 'Weapon' || loc === 'Two-handed Weapon');
+    else if (slot === 'left') fits = (item.type === 'Armor' && loc === 'Shield') || (item.type === 'Weapon' && loc === 'Weapon');
+    else if (slot === 'headTop' || slot === 'headMid' || slot === 'headLow') {
+      const cov = headCover(item);
+      fits = !!cov && item.type === 'Armor';
+      if (fits && headSlotOf(cov) !== slot) { P.push(`${tag}: ${loc} belongs in ${headSlotOf(cov)}.`); fits = true; }
+      if (fits && headSlotOf(cov) === slot) for (const c of cov.slice(1)) { const o = c === 'mid' ? 'headMid' : 'headLow'; if (eq[o]) P.push(`${tag}: covers the ${o} position, which is occupied.`); }
+    } else if (slot === 'armor') fits = item.type === 'Armor' && loc === 'Armor';
+    else if (slot === 'garment') fits = item.type === 'Armor' && loc === 'Garment';
+    else if (slot === 'shoes') fits = item.type === 'Armor' && loc === 'Footgear';
+    else if (slot === 'acc1' || slot === 'acc2') fits = item.type === 'Armor' && loc === 'Accessory';
+    else if (slot === 'ammo') fits = item.type === 'Ammunition';
+    if (!fits) { P.push(`${tag}: cannot be worn in the ${slot} position.`); continue; }
+    // job / sex / level
+    if (item.jobs && item.jobs.length && item.jobs.indexOf(jobDisplay(job)) < 0) P.push(`${tag}: ${jobDisplay(job)} cannot equip it.`);
+    else if (item.type === 'Weapon' && J.aspd[weaponType(item)] == null && weaponType(item) !== 'Fist') P.push(`${tag}: ${jobDisplay(job)} has no ASPD entry for ${weaponType(item)}.`);
+    if (sex && item.sex && item.sex !== 'Both' && item.sex !== sex) P.push(`${tag}: only for ${item.sex} characters.`);
+    if (item.eqlv > baseLv) P.push(`${tag}: needs base level ${item.eqlv}.`);
+    // refine / forge / cards
+    const refine = e.refine | 0;
+    if (refine < 0 || refine > 10) P.push(`${tag}: refine +${refine} is outside 0..10.`);
+    else if (refine > 0 && !item.refine) P.push(`${tag}: cannot be refined.`);
+    const forged = !!e.forgedEle || (e.starCrumbs | 0) > 0;
+    if (forged && !((slot === 'weapon' || slot === 'left') && item.type === 'Weapon')) P.push(`${tag}: only weapons can be forged.`);
+    if (e.forgedEle && ELES.indexOf(e.forgedEle) < 0) P.push(`${tag}: unknown forged element ${e.forgedEle}.`);
+    if ((e.starCrumbs | 0) < 0 || (e.starCrumbs | 0) > 3) P.push(`${tag}: star crumbs must be 0..3.`);
+    const cards = (e.cards || []).filter(Boolean);
+    if (cards.length > (item.slots | 0)) P.push(`${tag}: ${cards.length} cards but only ${item.slots | 0} slots.`);
+    if (forged && cards.length) P.push(`${tag}: a forged weapon cannot hold cards.`);
+    for (const ck of cards) {
+      const c = D.items[ck];
+      if (!c || c.type !== 'Card') { P.push(`${tag}: ${ck} is not a card.`); continue; }
+      let want = CARDSLOT[slot];
+      if (slot === 'left' && item.type === 'Weapon') want = 'Weapon';
+      if (c.sub !== 'Card' && c.sub !== want) P.push(`${tag}: ${c.name} is a ${c.sub} card, this is a ${want} slot.`);
+    }
+  }
+  // hand rules
+  if (rItem && rItem.loc === 'Two-handed Weapon' && eq.left) P.push('A two-handed weapon cannot be combined with a left-hand item.');
+  if (lItem && lItem.type === 'Weapon') {
+    if (job !== 'Assassin') P.push(`Only Assassins can dual wield; ${jobDisplay(job)} needs a shield in the left hand.`);
+    else if (!rItem) P.push('A left-hand weapon needs a right-hand weapon.');
+    else if (['Dagger', '1hSword', '1hAxe'].indexOf(weaponType(lItem)) < 0) P.push(`A ${weaponType(lItem)} cannot be used in the left hand.`);
+  }
+  return P;
+}
+
+return {compute, validate, BUFFS, weaponType, SONG_CASTER, statPointsUsed, ST, SLOTS, manualBonus, MANUAL_NUM: MANUAL_NUM.map(x => x[0]), MANUAL_MAP: MANUAL_MAP.map(x => x[0])};
+});
