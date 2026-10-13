@@ -2,6 +2,7 @@ import { createFileRoute, Link } from "@tanstack/react-router";
 import { useQuery } from "@tanstack/react-query";
 import { useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
+import { CharacterPortrait } from "@/components/CharacterPortrait";
 import { JobSelect } from "@/components/JobSelect";
 import { Input } from "@/components/ui/input";
 import { jobName } from "@/lib/ro/jobs";
@@ -23,7 +24,7 @@ function Members() {
   const [job, setJob] = useState("Any");
   const { data = [], isLoading } = useQuery({
     queryKey: ["members"],
-    queryFn: async () => (await supabase.from("profiles").select("id,display_name,char_name,job,base_lv,job_lv,gear_wishlist(status)").order("display_name")).data ?? [],
+    queryFn: async () => (await supabase.from("profiles").select("id,display_name,char_name,job,base_lv,job_lv,avatar_path,gear_wishlist(status)").order("display_name")).data ?? [],
   });
   const list = data.filter((m) => (job === "Any" || m.job === job) &&
     `${m.display_name} ${m.char_name ?? ""}`.toLowerCase().includes(q.toLowerCase()));
@@ -39,11 +40,14 @@ function Members() {
         {list.map((m) => {
           const need = m.gear_wishlist.filter((g) => g.status === "need").length;
           return (
-            <Link key={m.id} to="/members/$id" params={{ id: m.id }} className="rounded-lg border border-border bg-card p-4 transition hover:border-primary">
+            <Link key={m.id} to="/members/$id" params={{ id: m.id }} className="flex items-center gap-4 rounded-lg border border-border bg-card p-4 transition hover:border-primary">
+              <CharacterPortrait path={m.avatar_path} name={m.char_name || m.display_name} />
+              <div className="min-w-0">
               <div className="font-display text-lg font-bold">{m.char_name || m.display_name}</div>
               {m.char_name && <div className="text-xs text-muted-foreground">{m.display_name}</div>}
               <div className="mt-2 text-sm text-primary">{jobName(m.job)} · Base {m.base_lv} / Job {m.job_lv}</div>
               <div className="mt-1 text-xs text-muted-foreground">{need} item{need === 1 ? "" : "s"} still needed</div>
+              </div>
             </Link>
           );
         })}

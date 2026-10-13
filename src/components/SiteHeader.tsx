@@ -3,11 +3,12 @@ import { useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/lib/auth";
 import { Button } from "@/components/ui/button";
-import crest from "@/assets/crest.png";
+import crest from "@/assets/guild-blue-logo.png.asset.json";
 
 const NAV = [
   { to: "/parties", label: "Party Planner" },
   { to: "/members", label: "Members" },
+  { to: "/wishlists", label: "Wishlists" },
   { to: "/calculator", label: "Stat Calculator" },
   { to: "/skills", label: "Skill Simulator" },
 ] as const;
@@ -26,7 +27,7 @@ export function SiteHeader() {
     <header className="sticky top-0 z-30 border-b border-border bg-background/85 backdrop-blur">
       <div className="mx-auto flex max-w-6xl flex-wrap items-center gap-4 px-4 py-3">
         <Link to="/" className="flex items-center gap-2">
-          <img src={crest} alt="" width={36} height={36} className="h-9 w-9" />
+          <img src={crest.url} alt="" width={36} height={36} className="h-9 w-9" />
           <span className="font-display text-lg font-bold tracking-wide text-primary">Rune Midgard</span>
         </Link>
         <nav className="flex flex-wrap gap-1 text-sm">

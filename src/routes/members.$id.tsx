@@ -7,6 +7,7 @@ import { useAuth } from "@/lib/auth";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
+import { CharacterPortrait } from "@/components/CharacterPortrait";
 import { JobSelect } from "@/components/JobSelect";
 import { jobName } from "@/lib/ro/jobs";
 import { loadEngine, loadSkt, type Engine, type SktData } from "@/lib/ro/engine";
@@ -48,14 +49,17 @@ function Profile() {
 
   const sb = p.stat_build as unknown as StatBuild | null;
   const kb = p.skill_build as unknown as SkillBuild | null;
-  const refresh = () => qc.invalidateQueries({ queryKey: ["gear", id] });
+  const refresh = () => { qc.invalidateQueries({ queryKey: ["gear", id] }); qc.invalidateQueries({ queryKey: ["wishlists"] }); qc.invalidateQueries({ queryKey: ["members"] }); };
 
   return (
     <main className="mx-auto max-w-5xl space-y-8 px-4 py-10">
-      <section className="rounded-lg border border-border bg-card p-6">
-        <h1 className="text-4xl font-bold">{p.char_name || p.display_name}</h1>
+      <section>
+        <div className="flex items-center gap-6">
+        <CharacterPortrait path={p.avatar_path} name={p.char_name || p.display_name} className="h-36 w-28" />
+        <div className="min-w-0"><h1 className="text-4xl font-bold">{p.char_name || p.display_name}</h1>
         <p className="mt-1 text-primary">{jobName(p.job)} · Base {p.base_lv} / Job {p.job_lv}</p>
         {p.bio && <p className="mt-3 whitespace-pre-line text-muted-foreground">{p.bio}</p>}
+        </div></div>
         {isOwner && <EditProfile p={p} onSaved={() => qc.invalidateQueries({ queryKey: ["profile", id] })} />}
       </section>
 
@@ -115,7 +119,7 @@ function Profile() {
                 {isOwner && (
                   <div className="ml-auto flex gap-2">
                     <Button size="sm" variant="outline" onClick={async () => {
-                      await supabase.from("gear_wishlist").update({ status: g.status === "have" ? "need" : "have" }).eq("id", g.id); refresh();
+                      const { error } = await supabase.from("gear_wishlist").update({ status: g.status === "have" ? "need" : "have" }).eq("id", g.id); if (error) toast.error(error.message); else refresh();
                     }}>{g.status === "have" ? "Mark as needed" : "I have this now"}</Button>
                     <Button size="sm" variant="ghost" onClick={async () => { await supabase.from("gear_wishlist").delete().eq("id", g.id); refresh(); }}>Remove</Button>
                   </div>
@@ -130,12 +134,30 @@ function Profile() {
   );
 }
 
-function EditProfile({ p, onSaved }: { p: { id: string; display_name: string; char_name: string | null; job: string; base_lv: number; job_lv: number; bio: string | null }; onSaved: () => void }) {
+function EditProfile({ p, onSaved }: { p: { id: string; display_name: string; char_name: string | null; job: string; base_lv: number; job_lv: number; bio: string | null; avatar_path: string | null }; onSaved: () => void }) {
   const [f, setF] = useState({ display_name: p.display_name, char_name: p.char_name ?? "", job: p.job, base_lv: p.base_lv, job_lv: p.job_lv, bio: p.bio ?? "" });
   const [open, setOpen] = useState(false);
+  const [uploading, setUploading] = useState(false);
+  async function uploadPortrait(file?: File) {
+    if (!file) return;
+    if (!["image/png", "image/jpeg", "image/webp", "image/gif"].includes(file.type) || file.size > 5 * 1024 * 1024) { toast.error("Choose a PNG, JPEG, WebP or GIF under 5 MB"); return; }
+    setUploading(true);
+    const path = `${p.id}/${crypto.randomUUID()}.${file.name.split(".").pop()}`;
+    const { error } = await supabase.storage.from("character-portraits").upload(path, file, { contentType: file.type });
+    if (error) { setUploading(false); toast.error(error.message); return; }
+    const saved = await supabase.from("profiles").update({ avatar_path: path }).eq("id", p.id);
+    if (saved.error) { await supabase.storage.from("character-portraits").remove([path]); toast.error(saved.error.message); }
+    else { if (p.avatar_path) await supabase.storage.from("character-portraits").remove([p.avatar_path]); toast.success("Character picture saved"); onSaved(); }
+    setUploading(false);
+  }
   if (!open) return <Button className="mt-4" variant="outline" size="sm" onClick={() => setOpen(true)}>Edit profile</Button>;
   return (
     <div className="mt-4 grid gap-3 sm:grid-cols-2">
+      <div className="sm:col-span-2 flex flex-wrap items-center gap-3">
+        <Button asChild variant="outline"><a href="http://charsim.rune-nifelheim.com/en/" target="_blank" rel="noopener noreferrer">Create character picture ↗</a></Button>
+        <label className="text-sm">Character picture<Input aria-label="Character picture" type="file" accept="image/png,image/jpeg,image/webp,image/gif" disabled={uploading} onChange={(e) => uploadPortrait(e.target.files?.[0])} /></label>
+        {uploading && <span className="text-sm text-muted-foreground">Uploading…</span>}
+      </div>
       <Input placeholder="Display name" value={f.display_name} maxLength={40} onChange={(e) => setF({ ...f, display_name: e.target.value })} />
       <Input placeholder="Character name" value={f.char_name} maxLength={24} onChange={(e) => setF({ ...f, char_name: e.target.value })} />
       <JobSelect value={f.job} onChange={(job) => setF({ ...f, job })} />

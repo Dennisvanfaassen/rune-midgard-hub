@@ -1,5 +1,6 @@
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useState } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { z } from "zod";
 import { supabase } from "@/integrations/supabase/client";
@@ -8,7 +9,8 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
-import { JobSelect } from "@/components/JobSelect";
+import { fieldClass } from "@/components/JobSelect";
+import { PartyRoleSelect } from "@/components/PartyRoleSelect";
 import { MAX_PARTY_SIZE, PARTY_TEMPLATES, canAddSlot } from "@/lib/ro/jobs";
 
 export const Route = createFileRoute("/parties/new")({
@@ -35,19 +37,34 @@ function NewParty() {
   const { userId, ready } = useAuth();
   const navigate = useNavigate();
   const [f, setF] = useState({ title: "", place: "", notes: "", date: "", time: "20:00" });
-  const [template, setTemplate] = useState("mvp");
+  const [template, setTemplate] = useState("stala");
+  const qc = useQueryClient();
+  const templates = useQuery({ queryKey: ["party-templates"], queryFn: async () => { const { data, error } = await supabase.from("party_templates").select("*").order("created_at"); if (error) throw error; return data; } });
+  const allTemplates = [...PARTY_TEMPLATES, ...(templates.data ?? [])];
+  const [templateName, setTemplateName] = useState("");
+  const [savingTemplate, setSavingTemplate] = useState(false);
+  async function saveTemplate() {
+    if (!userId || !templateName.trim()) return;
+    setSavingTemplate(true);
+    const { data, error } = await supabase.from("party_templates").insert({ creator_id: userId, name: templateName.trim(), roles }).select().single();
+    setSavingTemplate(false);
+    if (error) { toast.error(error.message); return; }
+    await qc.invalidateQueries({ queryKey: ["party-templates"] });
+    setTemplate(data.id); setTemplateName(""); toast.success("Template shared with the guild");
+  }
   const [roles, setRoles] = useState<string[]>(PARTY_TEMPLATES[0]?.roles ?? ["Any"]);
   const [busy, setBusy] = useState(false);
 
   if (ready && !userId) return <main className="mx-auto max-w-xl px-4 py-16">Please <Link to="/auth" className="text-primary">sign in</Link> to plan a party.</main>;
 
   async function create() {
+    if (!userId) { toast.error("Sign in to create a party"); return; }
     const p = schema.safeParse(f);
     if (!p.success) { toast.error(p.error.issues[0]?.message ?? "Invalid input"); return; }
     if (roles.length < 1 || roles.length > MAX_PARTY_SIZE) { toast.error("A party has 1 to 12 slots"); return; }
     setBusy(true);
     const { data, error } = await supabase.from("parties").insert({
-      creator_id: userId!, title: p.data.title, place: p.data.place, notes: p.data.notes || null, template,
+      creator_id: userId, title: p.data.title, place: p.data.place, notes: p.data.notes || null, template,
       starts_at: new Date(`${f.date}T${f.time}`).toISOString(),
     }).select("id").single();
     if (error || !data) { setBusy(false); toast.error(error?.message ?? "Could not create party"); return; }
@@ -69,22 +86,21 @@ function NewParty() {
       </div>
 
       <h2 className="mt-8 text-2xl font-bold">Template</h2>
-      <div className="mt-3 grid gap-2 sm:grid-cols-3">
-        {PARTY_TEMPLATES.map((t) => (
-          <button key={t.id} onClick={() => { setTemplate(t.id); setRoles(t.roles); }}
-            className={"rounded-lg border p-3 text-left " + (template === t.id ? "border-primary bg-secondary" : "border-border bg-card hover:border-primary")}>
-            <div className="font-semibold">{t.name}</div>
-            <div className="text-xs text-muted-foreground">{t.description} ({t.roles.length} slots)</div>
-          </button>
-        ))}
+      <div className="mt-3 flex flex-wrap items-center gap-3">
+        <select aria-label="Party template" className={fieldClass + " min-w-60"} value={template} onChange={(e) => { const t = allTemplates.find((t) => t.id === e.target.value); if (t) { setTemplate(t.id); setRoles([...t.roles]); } }}>
+          <optgroup label="Guild defaults">{PARTY_TEMPLATES.map((t) => <option value={t.id} key={t.id}>{t.name} ({t.roles.length} slots)</option>)}</optgroup>
+          <optgroup label="Member templates">{(templates.data ?? []).map((t) => <option value={t.id} key={t.id}>{t.name} ({t.roles.length} slots)</option>)}</optgroup>
+        </select>
+        <span className="text-sm text-muted-foreground">{allTemplates.find((t) => t.id === template)?.description}</span>
       </div>
+      {templates.isError && <p className="mt-2 text-sm text-destructive">Could not load member templates.</p>}
 
       <h2 className="mt-8 text-2xl font-bold">Slots <span className="text-base text-muted-foreground">{roles.length}/{MAX_PARTY_SIZE}</span></h2>
       <div className="mt-3 grid gap-2 sm:grid-cols-2">
         {roles.map((r, i) => (
           <div key={i} className="flex items-center gap-2 rounded-md border border-border bg-card p-2">
             <span className="w-6 text-center text-sm text-muted-foreground">{i + 1}</span>
-            <JobSelect includeAny value={r} onChange={(v) => setRoles(roles.map((x, j) => (j === i ? v : x)))} className="flex-1" />
+            <PartyRoleSelect value={r} onChange={(v) => setRoles(roles.map((x, j) => (j === i ? v : x)))} className="flex-1" />
             <Button size="sm" variant="ghost" disabled={roles.length <= 1} onClick={() => setRoles(roles.filter((_, j) => j !== i))}>Remove</Button>
           </div>
         ))}
@@ -92,6 +108,10 @@ function NewParty() {
       <Button className="mt-3" variant="outline" disabled={!canAddSlot(roles.length)} onClick={() => setRoles([...roles, "Any"])}>
         {canAddSlot(roles.length) ? "Add slot" : "Party is full (12)"}
       </Button>
+      <div className="mt-6 flex flex-wrap gap-2">
+        <Input aria-label="New template name" placeholder="New template name" maxLength={80} className="max-w-xs" value={templateName} onChange={(e) => setTemplateName(e.target.value)} />
+        <Button variant="outline" disabled={!templateName.trim() || savingTemplate || !userId} onClick={saveTemplate}>Save slots as template</Button>
+      </div>
       <div className="mt-8"><Button size="lg" disabled={busy} onClick={create}>Create party</Button></div>
     </main>
   );
