@@ -82,3 +82,11 @@
 .rich-content img.ProseMirror-selectednode { outline: 2px solid var(--primary); }
 .rich-content mark { border-radius: 0.2rem; padding: 0 0.15rem; color: var(--background); }
 .rich-content p.is-editor-empty:first-child::before { content: attr(data-placeholder); color: var(--muted-foreground); float: left; height: 0; pointer-events: none; }
+
+/* Long-form forum guides: the TOC is generated automatically from headings. */
+.rich-content h1[id], .rich-content h2[id], .rich-content h3[id] { scroll-margin-top: 6rem; }
+.forum-toc { overflow-wrap: anywhere; }
+.forum-toc-link { text-decoration: none; transition: background-color 120ms ease, color 120ms ease; }
+.forum-toc-link:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
+html { scroll-behavior: smooth; }
+@media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } }
