@@ -64,7 +64,7 @@ function Profile() {
         {isOwner && <EditProfile p={p} onSaved={() => { qc.invalidateQueries({ queryKey: ["profile", id] }); qc.invalidateQueries({ queryKey: ["members"] }); qc.invalidateQueries({ queryKey: ["wishlists"] }); }} />}
       </section>
 
-      <XynklonBuild ownerId={id} isOwner={isOwner} saved={linkedBuild?.external_url ?? null} onSaved={() => qc.invalidateQueries({ queryKey: ["profile", id] })} />
+      <XynklonBuild ownerId={id} isOwner={isOwner} saved={linkedBuild?.external_url ?? null} job={jobName(p.job)} wishlist={gear.data ?? []} onGearChanged={refresh} onSaved={() => qc.invalidateQueries({ queryKey: ["profile", id] })} />
 
       <section className="rounded-lg border border-border bg-card p-6">
         <h2 className="text-xl font-bold">Gear wishlist</h2>
