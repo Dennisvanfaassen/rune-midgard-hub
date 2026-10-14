@@ -14,14 +14,15 @@ export function validateXynklonUrl(raw: string): { url: string; payload: Record<
     const parsed = new URL(raw.trim());
     if (parsed.protocol !== "https:" || parsed.hostname !== "soulbound.xynklon.workers.dev" || parsed.username || parsed.password || parsed.port || parsed.pathname !== "/") return null;
     const match = /^#calc=([A-Za-z0-9_-]+)$/.exec(parsed.hash);
-    if (!match || match[1].length > 12000) return null;
-    const code = match[1].replace(/-/g, "+").replace(/_/g, "/");
+    const payloadCode = match?.[1];
+    if (!match || !payloadCode || payloadCode.length > 12000) return null;
+    const code = payloadCode.replace(/-/g, "+").replace(/_/g, "/");
     const decoded = atob(code.padEnd(Math.ceil(code.length / 4) * 4, "="));
     const bytes = Uint8Array.from(decoded, (ch) => ch.charCodeAt(0));
     const data: unknown = JSON.parse(new TextDecoder().decode(bytes));
     if (!data || Array.isArray(data) || typeof data !== "object") return null;
     const payload = data as Record<string, unknown>;
-    if (payload.v !== 1) return null;
+    if (payload["v"] !== 1) return null;
     return { url: BUILDER + "#calc=" + match[1], payload };
   } catch { return null; }
 }
@@ -32,7 +33,7 @@ const LABELS: Record<string, string> = { weapon: "Weapon", left: "Off-hand / Shi
 const STATS = ["STR", "AGI", "VIT", "INT", "DEX", "LUK"];
 function itemName(key: string) { return key.replace(/_+$/, "").replace(/_+/g, " ").replace(/([a-z])([A-Z])/g, "$1 $2").trim(); }
 function extractEquipment(payload: Record<string, unknown>): SlotItem[] {
-  const equipment = payload.e;
+  const equipment = payload["e"];
   if (!equipment || typeof equipment !== "object" || Array.isArray(equipment)) return [];
   return Object.entries(equipment as Record<string, unknown>).flatMap(([slot, val]) => {
     const raw = Array.isArray(val) ? val[0] : val;
@@ -55,7 +56,7 @@ export function XynklonBuild({ ownerId, isOwner, saved, onSaved, job, wishlist, 
   const [busy, setBusy] = useState(false);
   const qc = useQueryClient();
   const build = saved ? validateXynklonUrl(saved) : null;
-  const stats = build && Array.isArray(build.payload.s) && build.payload.s.length === 6 && build.payload.s.every((x) => typeof x === "number" && Number.isFinite(x)) ? build.payload.s as number[] : null;
+  const stats = build && Array.isArray(build.payload["s"]) && build.payload["s"].length === 6 && build.payload["s"].every((x) => typeof x === "number" && Number.isFinite(x)) ? build.payload["s"] as number[] : null;
   const equipment = build ? extractEquipment(build.payload) : [];
   const [gearBusy, setGearBusy] = useState<string | null>(null);
   const statusOf = (key: string) => wishlist.find((g) => g.item_key === key)?.status;
@@ -149,7 +150,7 @@ export function XynklonBuild({ ownerId, isOwner, saved, onSaved, job, wishlist, 
       {!stats && equipment.length === 0 && <p className="text-xs text-muted-foreground">This link has no readable stat or equipment values. Open it in Xynklon to view the build.</p>}
       <p className="text-xs text-muted-foreground">Skill allocations are not present in this export and cannot be displayed automatically.</p>
     </div>}
-    {!build && <p className="mt-3 text-sm text-muted-foreground">{saved ? "This previously saved link is invalid." : "No Xynklon build linked yet."} {isOwner && "Make a build in Xynklon, copy its share URL and add it here."}</pv>}
+    {!build && <p className="mt-3 text-sm text-muted-foreground">{saved ? "This previously saved link is invalid." : "No Xynklon build linked yet."} {isOwner && "Make a build in Xynklon, copy its share URL and add it here."}</p>}
     <p className="mt-4 text-xs text-muted-foreground">External calculator: <a className="text-primary underline" href={BUILDER} target="_blank" rel="noopener noreferrer">SoulBound Xynklon ↗</a></p>
   </section>;
 }

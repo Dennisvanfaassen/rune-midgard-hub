@@ -12,7 +12,7 @@ export function useGuildBadges() {
     },
   });
 }
-export function GuildBadge({ role }: { role?: string | null }) {
+export function GuildBadge({ role }: { role?: string | null | undefined }) {
   if (role !== "Admin" && role !== "Officer") return null;
   return <span title={role === "Admin" ? "Rune Midgard administrator" : "Rune Midgard officer"}
     className={role === "Admin"
