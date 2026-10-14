@@ -14,6 +14,7 @@ import { itemDisplay } from "@/lib/ro/slots";
 import { HelpOffers, type HelpOffer } from "@/components/WishlistBoard";
 import { loadEngine, type Engine } from "@/lib/ro/engine";
 import { XynklonBuild, type ExternalBuild } from "@/components/XynklonBuild";
+import { ThemePreference } from "@/components/WebsiteTheme";
 
 export const Route = createFileRoute("/members/$id")({
   head: () => ({
@@ -61,6 +62,7 @@ function Profile() {
         <p className="mt-1 text-primary">{jobName(p.job)} · Base {p.base_lv} / Job {p.job_lv}</p>
         {p.bio && <p className="mt-3 whitespace-pre-line text-muted-foreground">{p.bio}</p>}
         </div></div>
+        {isOwner && <ThemePreference />}
         {isOwner && <EditProfile p={p} onSaved={() => { qc.invalidateQueries({ queryKey: ["profile", id] }); qc.invalidateQueries({ queryKey: ["members"] }); qc.invalidateQueries({ queryKey: ["wishlists"] }); }} />}
       </section>
 
