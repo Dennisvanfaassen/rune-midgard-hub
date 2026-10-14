@@ -1,3 +1,4 @@
+import { GuildBadge, useGuildBadges } from "@/components/GuildBadge";
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useMemo, useState } from "react";
@@ -59,7 +60,7 @@ function Profile() {
       <section>
         <div className="flex items-center gap-6">
         <CharacterPortrait path={p.avatar_path} name={p.char_name || p.display_name} className="h-36 w-28" />
-        <div className="min-w-0"><h1 className="text-4xl font-bold">{p.char_name || p.display_name}</h1>
+        <div className="min-w-0"><h1 className="flex flex-wrap items-center gap-2 text-4xl font-bold">{p.char_name || p.display_name}<GuildBadge role={guildRole.data} /></h1>
         <p className="mt-1 text-primary">{jobName(p.job)} · Base {p.base_lv} / Job {p.job_lv} · {guildRole.data ?? "Guildmember"}</p>
         {p.bio && <p className="mt-3 whitespace-pre-line text-muted-foreground">{p.bio}</p>}
         </div></div>
