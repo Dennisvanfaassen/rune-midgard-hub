@@ -22,7 +22,7 @@ export function validateXynklonUrl(raw: string): { url: string; payload: Record<
     const data: unknown = JSON.parse(new TextDecoder().decode(bytes));
     if (!data || Array.isArray(data) || typeof data !== "object") return null;
     const payload = data as Record<string, unknown>;
-    if (payload.v !== 1) return null;
+    if (payload["v"] !== 1) return null;
     return { url: BUILDER + "#calc=" + match[1], payload };
   } catch { return null; }
 }
@@ -33,7 +33,7 @@ const LABELS: Record<string, string> = { weapon: "Weapon", left: "Off-hand / Shi
 const STATS = ["STR", "AGI", "VIT", "INT", "DEX", "LUK"];
 function itemName(key: string) { return key.replace(/_+$/, "").replace(/_+/g, " ").replace(/([a-z])([A-Z])/g, "$1 $2").trim(); }
 function extractEquipment(payload: Record<string, unknown>): SlotItem[] {
-  const equipment = payload.e;
+  const equipment = payload["e"];
   if (!equipment || typeof equipment !== "object" || Array.isArray(equipment)) return [];
   return Object.entries(equipment as Record<string, unknown>).flatMap(([slot, val]) => {
     const raw = Array.isArray(val) ? val[0] : val;
@@ -56,7 +56,7 @@ export function XynklonBuild({ ownerId, isOwner, saved, onSaved, job, wishlist, 
   const [busy, setBusy] = useState(false);
   const qc = useQueryClient();
   const build = saved ? validateXynklonUrl(saved) : null;
-  const stats = build && Array.isArray(build.payload.s) && build.payload.s.length === 6 && build.payload.s.every((x) => typeof x === "number" && Number.isFinite(x)) ? build.payload.s as number[] : null;
+  const stats = build && Array.isArray(build.payload["s"]) && build.payload["s"].length === 6 && build.payload["s"].every((x) => typeof x === "number" && Number.isFinite(x)) ? build.payload["s"] as number[] : null;
   const equipment = build ? extractEquipment(build.payload) : [];
   const [gearBusy, setGearBusy] = useState<string | null>(null);
   const statusOf = (key: string) => wishlist.find((g) => g.item_key === key)?.status;
