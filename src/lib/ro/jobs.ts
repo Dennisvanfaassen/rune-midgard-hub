@@ -8,7 +8,7 @@ export type Job = (typeof JOBS)[number];
 export const jobName = (j: string) => (j === "Supernovice" ? "Super Novice" : j);
 
 export const MAX_PARTY_SIZE = 12;
-export const PARTY_ROLES = ["Any", "Tank", "Mobber", "Tapper", "SP", "Bragi", "Other"];
+export const PARTY_ROLES = ["Any", "Tank", "Mobber", "Tapper", "Trapper", "Greed", "SP", "Bragi", "Other"];
 export const PARTY_VISIBLE_FOR_MS = 4 * 60 * 60 * 1000;
 export const partyCutoff = (now = Date.now()) => new Date(now - PARTY_VISIBLE_FOR_MS).toISOString();
 export const isPartyVisible = (startsAt: string, now = Date.now()) => new Date(startsAt).getTime() + PARTY_VISIBLE_FOR_MS > now;
