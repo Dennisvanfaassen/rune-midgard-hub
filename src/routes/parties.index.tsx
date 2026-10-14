@@ -25,10 +25,24 @@ function Parties() {
     refetchInterval: 30_000,
     queryKey: ["parties"],
     queryFn: async () => {
-      const { data, error } = await supabase.from("parties").select("id,title,place,starts_at,template,profiles(display_name),party_slots(user_id)")
+      // Avoid PostgREST embedded joins: a missing/ambiguous FK must not hide parties.
+      const { data: parties, error } = await supabase.from("parties")
+        .select("id,title,place,starts_at,template,creator_id")
         .gt("starts_at", partyCutoff()).order("starts_at");
-      if (error) throw error;
-      return data ?? [];
+      if (error) throw new Error(`Parties: ${error.message} (${error.code})`);
+      if (!parties?.length) return [];
+      const [slotResult, profileResult] = await Promise.all([
+        supabase.from("party_slots").select("party_id,user_id").in("party_id", parties.map((p) => p.id)),
+        supabase.from("profiles").select("id,display_name").in("id", [...new Set(parties.map((p) => p.creator_id))]),
+      ]);
+      // Missing metadata should not prevent the actual parties from displaying.
+      if (slotResult.error) console.warn("Could not load party slot counts:", slotResult.error);
+      if (profileResult.error) console.warn("Could not load organiser names:", profileResult.error);
+      return parties.map((p) => ({
+        ...p,
+        party_slots: (slotResult.data ?? []).filter((slot) => slot.party_id === p.id),
+        profiles: (profileResult.data ?? []).find((person) => person.id === p.creator_id) ?? null,
+      }));
     },
   });
   return (
@@ -39,7 +53,7 @@ function Parties() {
           : <Button asChild variant="outline"><Link to="/auth">Sign in to plan a party</Link></Button>}
       </div>
       {isLoading && <p className="mt-6 text-muted-foreground">Loading…</p>}
-      {isError && <p className="mt-6 rounded-lg border border-destructive p-4 text-destructive">Could not load parties: {error instanceof Error ? error.message : "Database query failed"}</p>}
+      {isError && <p className="mt-6 rounded-lg border border-destructive p-4 text-destructive">Could not load parties: {error instanceof Error ? error.message : String((error as {message?:string})?.message ?? error)}</p>}
       <div className="mt-6 grid gap-3">
         {data.map((p) => {
           const filled = p.party_slots.filter((s) => s.user_id).length;
