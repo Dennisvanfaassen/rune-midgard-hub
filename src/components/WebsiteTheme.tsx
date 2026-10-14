@@ -23,7 +23,7 @@ function applyTheme(id: ThemeName) {
 }
 export function WebsiteThemeManager() {
   const { session, ready } = useAuth();
-  const id = session?.user?.user_metadata?.website_theme;
+  const id = session?.user?.user_metadata?.["website_theme"];
   useEffect(() => {
     if (!ready) return;
     const theme = isThemeName(id) ? id : "dark-midnight";
@@ -33,7 +33,7 @@ export function WebsiteThemeManager() {
 }
 export function ThemePreference() {
   const { session } = useAuth();
-  const saved = session?.user.user_metadata?.website_theme;
+  const saved = session?.user.user_metadata?.["website_theme"];
   const current: ThemeName = isThemeName(saved) ? saved : "dark-midnight";
   const [busy, setBusy] = useState(false);
   const [preview, setPreview] = useState<ThemeName | null>(null);
