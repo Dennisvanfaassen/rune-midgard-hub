@@ -256,6 +256,15 @@ export type Database = {
           { foreignKeyName: "party_waitlist_user_id_fkey"; columns: ["user_id"]; isOneToOne: false; referencedRelation: "profiles"; referencedColumns: ["id"] }
         ]
       }
+      party_readiness: {
+        Row: { party_id: string; user_id: string; ready: boolean; supplies_ready: boolean; updated_at: string }
+        Insert: { party_id: string; user_id: string; ready?: boolean; supplies_ready?: boolean; updated_at?: string }
+        Update: { party_id?: string; user_id?: string; ready?: boolean; supplies_ready?: boolean; updated_at?: string }
+        Relationships: [
+          { foreignKeyName: "party_readiness_party_id_fkey"; columns: ["party_id"]; isOneToOne: false; referencedRelation: "parties"; referencedColumns: ["id"] },
+          { foreignKeyName: "party_readiness_user_id_fkey"; columns: ["user_id"]; isOneToOne: false; referencedRelation: "profiles"; referencedColumns: ["id"] }
+        ]
+      }
       party_slots: {
         Row: {
           char_name: string | null
