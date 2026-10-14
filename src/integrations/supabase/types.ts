@@ -101,6 +101,7 @@ export type Database = {
         Row: {
           created_at: string
           id: string
+          quantity: number
           item_key: string
           item_name: string
           item_type: string | null
@@ -111,6 +112,7 @@ export type Database = {
         Insert: {
           created_at?: string
           id?: string
+          quantity?: number
           item_key: string
           item_name: string
           item_type?: string | null
