@@ -15,6 +15,7 @@ import { reportLovableError } from "../lib/lovable-error-reporting";
 import { supabase } from "@/integrations/supabase/client";
 import { AuthProvider } from "@/lib/auth";
 import { SiteHeader } from "@/components/SiteHeader";
+import guildCrest from "@/assets/guild-blue-bird.png.asset.json";
 import { WebsiteThemeManager } from "@/components/WebsiteTheme";
 import { Toaster } from "@/components/ui/sonner";
 
@@ -93,7 +94,9 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
       { rel: "preconnect", href: "https://fonts.gstatic.com", crossOrigin: "anonymous" },
       { rel: "stylesheet", href: "https://fonts.googleapis.com/css2?family=Cinzel:wght@500;700;900&family=Nunito+Sans:wght@400;600;700&display=swap" },
       { rel: "stylesheet", href: appCss },
-      { rel: "icon", type: "image/png", href: "/favicon.png" },
+      { rel: "icon", type: "image/png", href: guildCrest.url },
+      { rel: "shortcut icon", type: "image/png", href: guildCrest.url },
+      { rel: "apple-touch-icon", href: guildCrest.url },
     ],
   }),
   shellComponent: RootShell,
