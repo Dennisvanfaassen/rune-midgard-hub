@@ -32,8 +32,6 @@ create policy "buyers create marketplace offers" on public.market_offers for ins
   buyer_id=auth.uid() and status='pending' and responded_at is null
   and exists(select 1 from public.market_listings l where l.id=listing_id and l.seller_id<>auth.uid() and l.status='open')
 );
-create policy "buyers withdraw own marketplace offers" on public.market_offers for update to authenticated using (buyer_id=auth.uid() and status='pending')
-  with check (buyer_id=auth.uid() and status='withdrawn');
 -- Seller decisions run through an RPC to prevent changes to offer amount or buyer.
 create or replace function public.market_respond_offer(p_offer uuid,p_action text)
 returns void language plpgsql security definer set search_path=public as $$
@@ -48,3 +46,13 @@ begin
 end; $$;
 revoke all on function public.market_respond_offer(uuid,text) from public;
 grant execute on function public.market_respond_offer(uuid,text) to authenticated;
+
+create or replace function public.market_withdraw_offer(p_offer uuid)
+returns void language plpgsql security definer set search_path=public as $$
+begin
+  update public.market_offers set status='withdrawn',responded_at=now()
+  where id=p_offer and buyer_id=auth.uid() and status='pending';
+  if not found then raise exception 'Offer is unavailable or already handled'; end if;
+end; $$;
+revoke all on function public.market_withdraw_offer(uuid) from public;
+grant execute on function public.market_withdraw_offer(uuid) to authenticated;
