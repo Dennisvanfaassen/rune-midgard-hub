@@ -25,7 +25,7 @@ export const Route = createFileRoute("/auth")({
 
 const schema = z.object({
   email: z.string().trim().email().max(255),
-  password: z.string().min(6).max(72),
+  password: z.string().min(6, "Use at least 6 characters. No uppercase, numbers or symbols required.").max(72),
   name: z.string().trim().max(40).optional(),
 });
 
@@ -64,7 +64,7 @@ function AuthPage() {
       <form onSubmit={submit} className="mt-6 space-y-4 rounded-lg border border-border bg-card p-6">
         {mode === "up" && <div className="space-y-1"><Label>Display name</Label><Input value={name} onChange={(e) => setName(e.target.value)} maxLength={40} /></div>}
         <div className="space-y-1"><Label>Email</Label><Input type="email" value={email} onChange={(e) => setEmail(e.target.value)} /></div>
-        <div className="space-y-1"><Label>Password</Label><Input type="password" value={password} onChange={(e) => setPassword(e.target.value)} /></div>
+        <div className="space-y-1"><Label>Password</Label><Input type="password" minLength={6} maxLength={72} autoComplete={mode === "up" ? "new-password" : "current-password"} value={password} onChange={(e) => setPassword(e.target.value)} />{mode === "up" && <p className="text-xs text-muted-foreground">At least 6 characters. No uppercase letters, numbers or special symbols required.</p>}</div>
         <Button className="w-full" disabled={busy}>{mode === "in" ? "Sign in" : "Create account"}</Button>
         <Button type="button" variant="outline" className="w-full" onClick={google}>Continue with Google</Button>
       </form>
