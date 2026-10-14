@@ -10,7 +10,7 @@ import DOMPurify from "dompurify";
 import { toast } from "sonner";
 import {
   Bold, Italic, Underline, Strikethrough, Heading1, Heading2, Heading3, List, ListOrdered, Quote, Code2, Minus,
-  AlignLeft, AlignCenter, AlignRight, Link2, ImagePlus, ImageUp, Undo2, Redo2, Highlighter, Palette, Pilcrow,
+  AlignLeft, AlignCenter, AlignRight, Link2, ImagePlus, ImageUp, Undo2, Redo2, Highlighter, Palette, Pilcrow, FileCode2,
 } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/lib/auth";
@@ -36,6 +36,21 @@ export function sanitize(html: string) {
     ALLOWED_ATTR: ["href", "target", "rel", "src", "alt", "title", "style", "data-path", "data-color", "class"],
     ALLOWED_URI_REGEXP: /^(https?:|mailto:)/i,
   });
+}
+
+/** Import a complete HTML document as editable TipTap content, not executable page code. */
+function prepareImportedHtml(source: string): string {
+  const doc = new DOMParser().parseFromString(source, "text/html");
+  // Full HTML files often wrap the article in main/article elements.
+  const root = doc.querySelector("article") ?? doc.querySelector("main") ?? doc.body;
+  // Removing unsafe/external elements *before* flattening prevents CSS/JS text from appearing.
+  root.querySelectorAll("script, style, link, meta, iframe, object, embed, form, input, button, svg, canvas, noscript").forEach((node) => node.remove());
+  const clean = DOMPurify.sanitize(root.innerHTML, {
+    ALLOWED_TAGS: ["p", "br", "h1", "h2", "h3", "strong", "b", "em", "i", "u", "s", "a", "ul", "ol", "li", "blockquote", "pre", "code", "hr", "img", "span", "mark", "div"],
+    ALLOWED_ATTR: ["href", "src", "alt", "title", "style", "data-path"],
+    ALLOWED_URI_REGEXP: /^(https?:|mailto:)/i,
+  });
+  return clean.trim();
 }
 
 /** Replace stored image links with fresh signed links (private bucket). */
@@ -110,7 +125,7 @@ function Tool({ on, active, label, children, disabled }: { on: () => void; activ
     className={"inline-flex h-8 w-8 items-center justify-center rounded-md text-sm transition-colors disabled:opacity-40 " + (active ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:bg-secondary hover:text-foreground")}>{children}</button>;
 }
 
-function Toolbar({ editor, onUpload, uploading }: { editor: Editor; onUpload: () => void; uploading: boolean }) {
+function Toolbar({ editor, onUpload, onImport, uploading }: { editor: Editor; onUpload: () => void; onImport: () => void; uploading: boolean }) {
   const c = () => editor.chain().focus();
   const [palette, setPalette] = useState<"text" | "mark" | null>(null);
   const sep = <span className="mx-1 h-6 w-px bg-border" />;
@@ -152,6 +167,7 @@ function Toolbar({ editor, onUpload, uploading }: { editor: Editor; onUpload: ()
       if (!/^https?:\/\//i.test(url)) { toast.error("Links must start with https://"); return; }
       c().extendMarkRange("link").setLink({ href: url.trim() }).run();
     }}><Link2 className="h-4 w-4" /></Tool>
+    <Tool label="Import HTML document" on={onImport}><FileCode2 className="h-4 w-4" /></Tool>
     <Tool label="Upload image" disabled={uploading} on={onUpload}><ImageUp className="h-4 w-4" /></Tool>
     <Tool label="Image from link" on={() => {
       const url = window.prompt("Image address (https://…)");
@@ -171,6 +187,9 @@ export function RichEditor({ initial = "", onChange, placeholder = "Write someth
   const { userId } = useAuth();
   const fileRef = useRef<HTMLInputElement>(null);
   const [uploading, setUploading] = useState(false);
+  const [showImport, setShowImport] = useState(false);
+  const [importSource, setImportSource] = useState("");
+  const [replaceImport, setReplaceImport] = useState(true);
   const editor = useEditor({
     immediatelyRender: false,
     extensions: [
@@ -190,6 +209,20 @@ export function RichEditor({ initial = "", onChange, placeholder = "Write someth
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [editor]);
 
+  function importHtml() {
+    if (!editor || !importSource.trim()) return;
+    const cleaned = prepareImportedHtml(importSource);
+    if (!cleaned || !/<(?:p|h[123]|ul|ol|img|blockquote|div|pre)\\b/i.test(cleaned)) {
+      toast.error("No supported article content found in this HTML.");
+      return;
+    }
+    if (replaceImport) editor.commands.setContent(cleaned);
+    else editor.chain().focus().insertContent(cleaned).run();
+    setShowImport(false);
+    setImportSource("");
+    toast.success("HTML converted to editable forum content. Review before saving.");
+  }
+
   async function upload(file?: File) {
     if (!file || !editor || !userId) return;
     if (!["image/png", "image/jpeg", "image/webp", "image/gif"].includes(file.type) || file.size > 5 * 1024 * 1024) { toast.error("Choose a PNG, JPEG, WebP or GIF under 5 MB"); return; }
@@ -204,7 +237,19 @@ export function RichEditor({ initial = "", onChange, placeholder = "Write someth
 
   return <div className="rounded-md border border-input bg-background" onPaste={(e) => { const f = [...e.clipboardData.files].find((x) => x.type.startsWith("image/")); if (f) { e.preventDefault(); upload(f); } }}
     onDrop={(e) => { const f = [...e.dataTransfer.files].find((x) => x.type.startsWith("image/")); if (f) { e.preventDefault(); upload(f); } }}>
-    {editor && <Toolbar editor={editor} uploading={uploading} onUpload={() => fileRef.current?.click()} />}
+    {editor && <Toolbar editor={editor} uploading={uploading} onImport={() => setShowImport(true)} onUpload={() => fileRef.current?.click()} />}
+    {showImport && <div className="m-3 grid gap-3 rounded-md border border-primary/40 bg-card p-3">
+      <div>
+        <div className="font-semibold">Import HTML guide</div>
+        <p className="text-xs text-muted-foreground">Paste the entire HTML file, including &lt;!doctype html&gt; if present. Headings, text, links, lists and remote images become editable. Scripts, styles and unsupported page layouts are removed.</p>
+      </div>
+      <textarea aria-label="HTML document source" className="min-h-44 w-full resize-y rounded border border-input bg-background p-3 font-mono text-xs text-foreground" value={importSource} onChange={(e) => setImportSource(e.target.value)} placeholder="Paste HTML source here…" />
+      <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={replaceImport} onChange={(e) => setReplaceImport(e.target.checked)} /> Replace current editor content</label>
+      <div className="flex gap-2">
+        <button type="button" className="rounded bg-primary px-3 py-2 text-sm font-semibold text-primary-foreground disabled:opacity-50" disabled={!importSource.trim()} onClick={importHtml}>Import and preview</button>
+        <button type="button" className="rounded border border-border px-3 py-2 text-sm" onClick={() => setShowImport(false)}>Cancel</button>
+      </div>
+    </div>}
     <EditorContent editor={editor} />
     <input ref={fileRef} type="file" hidden accept="image/png,image/jpeg,image/webp,image/gif" onChange={(e) => { upload(e.target.files?.[0]); e.target.value = ""; }} />
   </div>;
