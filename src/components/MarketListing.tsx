@@ -34,9 +34,9 @@ export function ListingCard({ l, mine, onChange }: { l: Listing; mine?: boolean;
     <div className="flex items-start gap-2">
       <div className="min-w-0 flex-1"><h3 className="font-semibold">{itemDisplay(l.item_key, l.item_name)}{l.quantity > 1 && <span className="text-muted-foreground"> ×{l.quantity}</span>}</h3>
         {l.status !== "open" && <span className="text-xs font-semibold uppercase text-accent">{l.status}</span>}</div>
-      <div className="flex items-center gap-1 rounded-md bg-secondary px-2 py-1 font-bold text-primary"><Coins className="h-4 w-4" />{formatZeny(l.price)}</div>
+      <div className={`flex items-center gap-1 rounded-md px-2 py-1 font-bold ${l.price === 0 ? "bg-emerald-500/15 text-emerald-500" : "bg-secondary text-primary"}`}>{l.price === 0 ? "FREE" : <><Coins className="h-4 w-4" />{formatZeny(l.price)}</>}</div>
     </div>
-    {l.quantity > 1 && <p className="text-xs text-muted-foreground">{formatZeny(l.price / l.quantity)} each</p>}
+    {l.quantity > 1 && l.price > 0 && <p className="text-xs text-muted-foreground">{formatZeny(l.price / l.quantity)} each</p>}
     {l.note && <p className="mt-2 whitespace-pre-line text-sm text-muted-foreground">{l.note}</p>}
     {p && <Link to="/members/$id" params={{ id: p.id }} className="mt-auto flex items-center gap-2 pt-3 text-sm">
       <CharacterPortrait path={p.avatar_path} name={p.char_name || p.display_name} className="h-8 w-7" /><span>Sold by <span className="font-semibold text-primary">{p.char_name || p.display_name}</span> <GuildBadge role={badges.data?.[p.id]} /></span>
