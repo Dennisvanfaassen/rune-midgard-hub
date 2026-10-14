@@ -43,6 +43,27 @@ function PartyPage() {
   });
   const [job, setJob] = useState("Knight");
   const [joining, setJoining] = useState(false);
+  const readiness = useQuery({
+    queryKey: ["party-readiness", id],
+    queryFn: async () => {
+      const { data, error } = await supabase.from("party_readiness").select("*").eq("party_id", id);
+      if (error) throw error;
+      return data ?? [];
+    },
+    enabled: !!userId,
+  });
+  async function markReady(field: "ready" | "supplies_ready", checked: boolean) {
+    if (!userId) return;
+    const current = readiness.data?.find((r) => r.user_id === userId);
+    const { error } = await supabase.from("party_readiness").upsert({
+      party_id: id, user_id: userId,
+      ready: field === "ready" ? checked : current?.ready ?? false,
+      supplies_ready: field === "supplies_ready" ? checked : current?.supplies_ready ?? false,
+      updated_at: new Date().toISOString(),
+    });
+    if (error) toast.error(error.message);
+    else qc.invalidateQueries({ queryKey: ["party-readiness", id] });
+  }
   const waitlist = useQuery({ queryKey: ["party-waitlist",id], refetchInterval: 30_000,
     queryFn: async () => { const {data,error}=await supabase.from("party_waitlist").select("*,profiles(display_name)").eq("party_id",id).order("created_at"); if(error) throw error; return data ?? []; }
   });
@@ -101,6 +122,14 @@ function PartyPage() {
         <div className="flex-1 text-sm">{mine ? "You're confirmed for this party." : reserve ? "You're on the substitute list. If a matching place opens, you will be moved in automatically." : "Sign up even if all 12 places are taken or your class isn't needed."}</div>
         {mine || reserve ? <Button variant="outline" onClick={()=>leave()}>Cancel sign-up</Button> : <Button disabled={joining} onClick={join}>{joining ? "Joining…" : "Sign up"}</Button>}
       </div>}
+      {mine && <section className="mt-4 rounded-xl border border-border bg-card p-4">
+        <h2 className="mb-3 font-semibold">My party readiness</h2>
+        <div className="flex flex-wrap gap-5 text-sm">
+          <label className="flex items-center gap-2"><input type="checkbox" checked={readiness.data?.find((r) => r.user_id === userId)?.ready ?? false} onChange={(e) => markReady("ready", e.target.checked)} />Ready to join</label>
+          <label className="flex items-center gap-2"><input type="checkbox" checked={readiness.data?.find((r) => r.user_id === userId)?.supplies_ready ?? false} onChange={(e) => markReady("supplies_ready", e.target.checked)} />Supplies prepared</label>
+        </div>
+        {readiness.isError && <p className="mt-2 text-xs text-destructive">Readiness requires the latest Supabase SQL migration.</p>}
+      </section>}
       <div className="mt-4 grid gap-2 sm:grid-cols-2">
         {slots.map((s) => (
           <div key={s.id} className={"flex items-center gap-3 rounded-lg border p-3 " + (s.user_id ? "border-primary/40 bg-card" : "border-dashed border-border")}>
@@ -108,7 +137,7 @@ function PartyPage() {
               <div className="text-xs uppercase tracking-wide text-muted-foreground">{s.role === "Any" ? "Any class" : jobName(s.role)}</div>
               {s.user_id ? (
                 <Link to="/members/$id" params={{ id: s.user_id }} className="font-semibold hover:text-primary">
-                  {s.char_name || s.profiles?.display_name} <span className="text-sm text-primary">{s.job && jobName(s.job)}</span>
+                  {s.char_name || s.profiles?.display_name} {readiness.data?.find((r) => r.user_id === s.user_id)?.ready && <span title="Member ready" className="text-xs text-emerald-500">✓ Ready</span>} {readiness.data?.find((r) => r.user_id === s.user_id)?.supplies_ready && <span title="Supplies ready" className="text-xs text-emerald-500">✓ Supplies</span>} <span className="text-sm text-primary">{s.job && jobName(s.job)}</span>
                 </Link>
               ) : <div className="text-sm text-muted-foreground">Open slot</div>}
             </div>
