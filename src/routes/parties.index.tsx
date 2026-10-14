@@ -21,11 +21,15 @@ export const Route = createFileRoute("/parties/")({
 
 function Parties() {
   const { userId } = useAuth();
-  const { data = [], isLoading } = useQuery({
+  const { data = [], isLoading, isError, error } = useQuery({
     refetchInterval: 30_000,
     queryKey: ["parties"],
-    queryFn: async () => (await supabase.from("parties").select("id,title,place,starts_at,template,profiles(display_name),party_slots(user_id)")
-      .gt("starts_at", partyCutoff()).order("starts_at")).data ?? [],
+    queryFn: async () => {
+      const { data, error } = await supabase.from("parties").select("id,title,place,starts_at,template,profiles(display_name),party_slots(user_id)")
+        .gt("starts_at", partyCutoff()).order("starts_at");
+      if (error) throw error;
+      return data ?? [];
+    },
   });
   return (
     <main className="mx-auto max-w-5xl px-4 py-10">
@@ -35,6 +39,7 @@ function Parties() {
           : <Button asChild variant="outline"><Link to="/auth">Sign in to plan a party</Link></Button>}
       </div>
       {isLoading && <p className="mt-6 text-muted-foreground">Loading…</p>}
+      {isError && <p className="mt-6 rounded-lg border border-destructive p-4 text-destructive">Could not load parties: {error instanceof Error ? error.message : "Database query failed"}</p>}
       <div className="mt-6 grid gap-3">
         {data.map((p) => {
           const filled = p.party_slots.filter((s) => s.user_id).length;
@@ -49,7 +54,7 @@ function Parties() {
             </Link>
           );
         })}
-        {!isLoading && data.length === 0 && <p className="text-muted-foreground">No upcoming parties. Plan the first one!</p>}
+        {!isLoading && !isError && data.length === 0 && <p className="text-muted-foreground">No upcoming parties. Plan the first one!</p>}
       </div>
     </main>
   );
