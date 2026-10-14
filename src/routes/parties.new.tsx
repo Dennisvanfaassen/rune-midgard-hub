@@ -45,6 +45,7 @@ function NewParty() {
   const [step, setStep] = useState(0);
   const [activity, setActivity] = useState("leveling");
   const [templateFilter, setTemplateFilter] = useState("");
+  const [templateScope, setTemplateScope] = useState("all");
   const [showLibrary, setShowLibrary] = useState(false);
   const [quick, setQuick] = useState(false);
   function repeatLast() {
@@ -119,7 +120,12 @@ function NewParty() {
     setArchiveIds(next);
     localStorage.setItem("party-archived-templates", JSON.stringify(next));
   }
-  const filteredTemplates = allTemplates.filter((t) => !archiveIds.includes(t.id) && ((t.name + " " + (t.description || "")).toLowerCase().includes(templateFilter.toLowerCase()) || templateCategory(t).toLowerCase().includes(templateFilter.toLowerCase())));
+  const filteredTemplates = allTemplates.filter((t) =>
+    (templateScope === "archived" ? archiveIds.includes(t.id) : !archiveIds.includes(t.id))
+    && (templateScope !== "mine" || ("creator_id" in t && t.creator_id === userId))
+    && (!["MVP", "Endless Tower", "Leveling", "Farming", "Custom"].includes(templateScope) || templateCategory(t) === templateScope)
+    && ((t.name + " " + (t.description || "")).toLowerCase().includes(templateFilter.toLowerCase()) || templateCategory(t).toLowerCase().includes(templateFilter.toLowerCase()))
+  );
   const [templateName, setTemplateName] = useState("");
   async function updateTemplate() {
     if (!userId || !templateName.trim()) { toast.error("Enter a template name"); return; }
@@ -190,6 +196,8 @@ function NewParty() {
         <div className="flex flex-wrap gap-2">{[...new Set([...favoriteIds, ...recentIds])].slice(0,5).map((id) => {
           const t = allTemplates.find((x) => x.id === id); return t ? <Button key={id} variant="outline" size="sm" onClick={() => applyTemplate(id)}>{favoriteIds.includes(id) ? "★ " : "Recent: "}{t.name}</Button> : null;
         })}</div>
+        <div className="flex flex-wrap gap-1">{["all","mine","MVP","Endless Tower","Leveling","Farming","Custom","archived"].map((scope) =>
+          <Button key={scope} size="sm" variant={scope === templateScope ? "default" : "outline"} onClick={() => { setTemplateScope(scope); setShowLibrary(true); }}>{scope === "mine" ? "My templates" : scope === "all" ? "All" : scope === "archived" ? "Archived" : scope}</Button>)}</div>
         <Input placeholder="Search activity or template" value={templateFilter} onChange={(e) => { setTemplateFilter(e.target.value); setShowLibrary(true); }} />
         <div className={showLibrary || templateFilter ? "grid max-h-80 gap-2 overflow-auto sm:grid-cols-2" : "grid gap-2 sm:grid-cols-2"}>
           {(showLibrary || templateFilter ? filteredTemplates : filteredTemplates.filter((t) => t.id === template || favoriteIds.includes(t.id)).slice(0,4)).map((t) =>
@@ -197,7 +205,7 @@ function NewParty() {
               <button className="min-w-0 flex-1 text-left" onClick={() => applyTemplate(t.id)}><div className="font-semibold">{t.name} · {t.roles.length}/12</div><p className="text-xs text-muted-foreground">{templateCategory(t)} · {t.description || "Member-created setup"}</p></button>
               <Button title="Favorite" variant="ghost" size="sm" onClick={() => toggleFavorite(t.id)}>{favoriteIds.includes(t.id) ? "★" : "☆"}</Button>
               {"creator_id" in t && t.creator_id === userId && <Button title="Duplicate template" variant="ghost" size="sm" onClick={() => { applyTemplate(t.id); setTemplateName(t.name + " copy"); setStep(2); }}>Copy</Button>}
-              <Button title="Archive locally" variant="ghost" size="sm" onClick={() => toggleArchive(t.id)}>Archive</Button>
+              <Button title="Archive locally" variant="ghost" size="sm" onClick={() => toggleArchive(t.id)}>{archiveIds.includes(t.id) ? "Restore" : "Archive"}</Button>
               {"creator_id" in t && t.creator_id === userId && <Button title="Delete my template" variant="ghost" size="sm" onClick={() => deleteTemplate(t.id)}>Delete</Button>}
             </div>)}
         </div>
