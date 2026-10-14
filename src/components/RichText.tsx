@@ -212,7 +212,7 @@ export function RichEditor({ initial = "", onChange, placeholder = "Write someth
   function importHtml() {
     if (!editor || !importSource.trim()) return;
     const cleaned = prepareImportedHtml(importSource);
-    if (!cleaned || !/<(?:p|h[123]|ul|ol|img|blockquote|div|pre)\\b/i.test(cleaned)) {
+    if (!cleaned || !/<(?:p|h[123]|ul|ol|img|blockquote|div|pre)\b/i.test(cleaned)) {
       toast.error("No supported article content found in this HTML.");
       return;
     }
