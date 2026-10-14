@@ -65,16 +65,46 @@ export function XynklonBuild({ ownerId, isOwner, saved, onSaved, job, wishlist, 
   }
 
   async function save(url: string | null) {
-    const parsed = url ? validateXynklonUrl(url) : null;
-    if (url && !parsed) { toast.error("Paste a valid Xynklon share link containing #calc=."); return; }
+    if (busy) return;
+    const trimmed = url?.trim() || null;
+    const parsed = trimmed ? validateXynklonUrl(trimmed) : null;
+    if (trimmed && !parsed) {
+      toast.error("Invalid Xynklon link. Copy the full Share URL ending in #calc=…");
+      return;
+    }
     setBusy(true);
-    const { error } = await supabase.from("profiles").update({ stat_build: url ? { source: "xynklon", external_url: parsed!.url } : null }).eq("id", ownerId);
-    setBusy(false);
-    if (error) { toast.error(error.message); return; }
-    qc.invalidateQueries({ queryKey: ["profile", ownerId] });
-    onSaved();
-    setEditing(false);
-    toast.success(url ? "Xynklon build saved to your profile" : "Build link removed");
+    try {
+      const { data: authData, error: authError } = await supabase.auth.getUser();
+      if (authError || authData.user?.id !== ownerId) {
+        toast.error("Your session has expired. Sign in again to update your own build.");
+        return;
+      }
+      const newBuild = parsed ? { source: "xynklon", external_url: parsed.url } : null;
+      const { data, error } = await supabase.from("profiles")
+        .update({ stat_build: newBuild })
+        .eq("id", ownerId)
+        .select("id,stat_build")
+        .maybeSingle();
+      if (error) { toast.error("Could not update your build: " + error.message); return; }
+      if (!data) {
+        toast.error("The build wasn't saved. Your profile may not allow updates; please check account permissions.");
+        return;
+      }
+      const stored = data.stat_build as ExternalBuild | null;
+      if ((stored?.external_url ?? null) !== (parsed?.url ?? null)) {
+        toast.error("The database did not retain the new link. Please try again.");
+        return;
+      }
+      await qc.invalidateQueries({ queryKey: ["profile", ownerId] });
+      onSaved();
+      setEditing(false);
+      setValue(parsed?.url ?? "");
+      toast.success(parsed ? "Xynklon build updated! Your new stats and gear are now saved." : "Xynklon build link removed.");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Could not save your Xynklon build.");
+    } finally {
+      setBusy(false);
+    }
   }
 
   return <section className="rounded-lg border border-border bg-card p-6">
@@ -105,7 +135,7 @@ export function XynklonBuild({ ownerId, isOwner, saved, onSaved, job, wishlist, 
     {!build && <p className="mt-3 text-sm text-muted-foreground">{saved ? "This previously saved link is invalid." : "No Xynklon build linked yet."} {isOwner && "Make a build in Xynklon, copy its share URL and add it here."}</p>}
     {editing && isOwner && <div className="mt-4 space-y-3 rounded-md border border-border bg-secondary/30 p-3">
       <label className="block text-sm font-semibold" htmlFor="xynklon-link">Xynklon share URL</label>
-      <Input id="xynklon-link" value={value} onChange={(e) => setValue(e.target.value)} placeholder="https://soulbound.xynklon.workers.dev/#calc=..." />
+      <Input id="xynklon-link" disabled={busy} value={value} onChange={(e) => setValue(e.target.value)} placeholder="https://soulbound.xynklon.workers.dev/#calc=..." />
       <p className="text-xs text-muted-foreground">Only valid links from soulbound.xynklon.workers.dev are accepted. A link that contains only &#123;&quot;v&quot;:1&#125; cannot display stats locally.</p>
       <div className="flex flex-wrap gap-2">
         <Button disabled={busy || !value.trim()} onClick={() => save(value)}>Save build link</Button>
