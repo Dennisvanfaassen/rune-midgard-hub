@@ -1,3 +1,4 @@
+import { GuildBadge, useGuildBadges } from "@/components/GuildBadge";
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
@@ -25,10 +26,11 @@ export const Route = createFileRoute("/forum/$id")({
 type Author = { id: string; display_name: string; char_name: string | null; job: string; avatar_path: string | null } | null;
 
 function PostCard({ author, body, date, actions }: { author: Author; body: string; date: string; actions?: React.ReactNode }) {
+  const badges = useGuildBadges();
   return <article className="flex gap-4 rounded-lg border border-border bg-card p-4">
     <Link to="/members/$id" params={{ id: author?.id ?? "" }} className="hidden w-28 shrink-0 flex-col items-center text-center sm:flex">
       <CharacterPortrait path={author?.avatar_path ?? null} name={author?.char_name || author?.display_name || "?"} className="h-20 w-16" />
-      <span className="mt-1 text-sm font-semibold text-primary">{author?.char_name || author?.display_name}</span>
+      <span className="mt-1 text-sm font-semibold text-primary">{author?.char_name || author?.display_name}</span><GuildBadge role={badges.data?.[author?.id ?? ""]} />
       <span className="text-xs text-muted-foreground">{author && jobName(author.job)}</span>
     </Link>
     <div className="min-w-0 flex-1">
