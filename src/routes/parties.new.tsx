@@ -1,5 +1,5 @@
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { z } from "zod";
@@ -47,6 +47,15 @@ function NewParty() {
   const [templateFilter, setTemplateFilter] = useState("");
   const [showLibrary, setShowLibrary] = useState(false);
   const [quick, setQuick] = useState(false);
+  function repeatLast() {
+    try {
+      const last = JSON.parse(localStorage.getItem("last-created-guild-party") || "null") as { title: string; place: string; notes: string; roles: string[]; signupMode: "core"|"open"; checklist: {quantity:number;name:string}[]; template: string } | null;
+      if (!last) { toast.error("No previous party saved in this browser"); return; }
+      setF((v) => ({ ...v, title: last.title, place: last.place, notes: last.notes }));
+      setRoles(last.roles.slice(0, MAX_PARTY_SIZE)); setSignupMode(last.signupMode); setChecklist(last.checklist); setTemplate(last.template); setQuick(true);
+      toast.success("Previous party copied. Set a new date and time.");
+    } catch { toast.error("Could not restore previous party"); }
+  }
   const [favoriteIds, setFavoriteIds] = useState<string[]>([]);
   const [recentIds, setRecentIds] = useState<string[]>([]);
   useEffect(() => {
@@ -158,6 +167,7 @@ function NewParty() {
     if (e2) { toast.error(e2.message); return; }
     announce({ data: { partyId: data.id, origin: window.location.origin } }).then((r) => { if (r.sent) toast.success("Posted to Discord #party-planner"); else toast.error(`Not posted to Discord: ${DISCORD_REASON[r.reason ?? ""] ?? "unknown problem"}`); }).catch((e) => toast.error(`Not posted to Discord: ${e instanceof Error ? e.message : "network error"}`));
     remember(template);
+    localStorage.setItem("last-created-guild-party", JSON.stringify({ title: p.data.title, place: p.data.place, notes: p.data.notes, roles, signupMode, checklist, template }));
     navigate({ to: "/parties/$id", params: { id: data.id } });
   }
 
@@ -165,7 +175,10 @@ function NewParty() {
     <main className="mx-auto max-w-3xl px-4 py-10">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div><h1 className="text-4xl font-bold">Plan a party</h1><p className="mt-1 text-sm text-muted-foreground">Create a party from an activity and a reusable setup.</p></div>
-        <Button variant="outline" onClick={() => { setQuick((v) => !v); setStep(0); }}>{quick ? "Guided setup" : "Quick create"}</Button>
+        <div className="flex flex-wrap gap-2">
+          <Button variant="outline" onClick={repeatLast}>Repeat last party</Button>
+          <Button variant="outline" onClick={() => { setQuick((v) => !v); setStep(0); }}>{quick ? "Guided setup" : "Quick create"}</Button>
+        </div>
       </div>
       {!quick && <div className="my-6 flex flex-wrap gap-2">{["Activity & template", "Time & place", "Roster & supplies"].map((name,i) =>
         <Button key={name} size="sm" variant={step === i ? "default" : "outline"} onClick={() => setStep(i)}>{i+1}. {name}</Button>)}</div>}
