@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { ExternalLink, Link2, Trash2 } from "lucide-react";
 import { toast } from "sonner";
@@ -44,6 +44,13 @@ function extractEquipment(payload: Record<string, unknown>): SlotItem[] {
 }
 export function XynklonBuild({ ownerId, isOwner, saved, onSaved, job, wishlist, onGearChanged }: { ownerId: string; isOwner: boolean; saved: string | null; onSaved: () => void; job: string; wishlist: GearRecord[]; onGearChanged: () => void }) {
   const [editing, setEditing] = useState(false);
+  const editorRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLTextAreaElement>(null);
+  useEffect(() => {
+    if (!editing) return;
+    editorRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
+    inputRef.current?.focus({ preventScroll: true });
+  }, [editing]);
   const [value, setValue] = useState(saved ?? "");
   const [busy, setBusy] = useState(false);
   const qc = useQueryClient();
@@ -113,8 +120,18 @@ export function XynklonBuild({ ownerId, isOwner, saved, onSaved, job, wishlist, 
         <h2 className="text-xl font-bold">Character build</h2>
         <p className="mt-1 text-sm text-muted-foreground">Stats and skills planned with the SoulBound Xynklon calculator.</p>
       </div>
-      {isOwner && <Button variant="outline" size="sm" onClick={() => { setValue(saved ?? ""); setEditing((v) => !v); }}><Link2 className="mr-2 h-4 w-4" />{saved ? "Change link" : "Add build link"}</Button>}
+      {isOwner && <Button variant="outline" size="sm" onClick={() => { if (!editing) setValue(saved ?? ""); setEditing((v) => !v); }}><Link2 className="mr-2 h-4 w-4" />{saved ? "Change link" : "Add build link"}</Button>}
     </div>
+    {editing && isOwner && <div ref={editorRef} className="mt-4 space-y-3 rounded-md border border-border bg-secondary/30 p-3">
+      <label className="block text-sm font-semibold" htmlFor="xynklon-link">Xynklon share URL</label>
+      <textarea ref={inputRef} id="xynklon-link" disabled={busy} value={value} onChange={(e) => setValue(e.target.value)} placeholder="https://soulbound.xynklon.workers.dev/#calc=..." rows={3} spellCheck={false} className="w-full resize-y break-all rounded-md border border-input bg-background px-3 py-2 text-sm text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" />
+      <p className="text-xs text-muted-foreground">Only valid links from soulbound.xynklon.workers.dev are accepted. A link that contains only &#123;&quot;v&quot;:1&#125; cannot display stats locally.</p>
+      <div className="flex flex-wrap gap-2">
+        <Button disabled={busy || !value.trim()} onClick={() => save(value)}>Save build link</Button>
+        {saved && <Button disabled={busy} variant="outline" onClick={() => save(null)}><Trash2 className="mr-2 h-4 w-4" />Remove link</Button>}
+        <Button variant="ghost" onClick={() => setEditing(false)}>Cancel</Button>
+      </div>
+    </div>}
     {build && <div className="mt-4 space-y-3">
       <Button asChild><a href={build.url} target="_blank" rel="noopener noreferrer">Open stats & skills in Xynklon <ExternalLink className="ml-2 h-4 w-4" /></a></Button>
       <div className="rounded-md bg-secondary/40 p-3"><div className="text-xs uppercase text-muted-foreground">Character class (guild profile)</div><strong className="text-lg text-primary">{job}</strong><p className="text-xs text-muted-foreground">This calculator link does not specify a class; change it under Edit profile.</p></div>
@@ -132,17 +149,7 @@ export function XynklonBuild({ ownerId, isOwner, saved, onSaved, job, wishlist, 
       {!stats && equipment.length === 0 && <p className="text-xs text-muted-foreground">This link has no readable stat or equipment values. Open it in Xynklon to view the build.</p>}
       <p className="text-xs text-muted-foreground">Skill allocations are not present in this export and cannot be displayed automatically.</p>
     </div>}
-    {!build && <p className="mt-3 text-sm text-muted-foreground">{saved ? "This previously saved link is invalid." : "No Xynklon build linked yet."} {isOwner && "Make a build in Xynklon, copy its share URL and add it here."}</p>}
-    {editing && isOwner && <div className="mt-4 space-y-3 rounded-md border border-border bg-secondary/30 p-3">
-      <label className="block text-sm font-semibold" htmlFor="xynklon-link">Xynklon share URL</label>
-      <Input id="xynklon-link" disabled={busy} value={value} onChange={(e) => setValue(e.target.value)} placeholder="https://soulbound.xynklon.workers.dev/#calc=..." />
-      <p className="text-xs text-muted-foreground">Only valid links from soulbound.xynklon.workers.dev are accepted. A link that contains only &#123;&quot;v&quot;:1&#125; cannot display stats locally.</p>
-      <div className="flex flex-wrap gap-2">
-        <Button disabled={busy || !value.trim()} onClick={() => save(value)}>Save build link</Button>
-        {saved && <Button disabled={busy} variant="outline" onClick={() => save(null)}><Trash2 className="mr-2 h-4 w-4" />Remove link</Button>}
-        <Button variant="ghost" onClick={() => setEditing(false)}>Cancel</Button>
-      </div>
-    </div>}
+    {!build && <p className="mt-3 text-sm text-muted-foreground">{saved ? "This previously saved link is invalid." : "No Xynklon build linked yet."} {isOwner && "Make a build in Xynklon, copy its share URL and add it here."}</pv>}
     <p className="mt-4 text-xs text-muted-foreground">External calculator: <a className="text-primary underline" href={BUILDER} target="_blank" rel="noopener noreferrer">SoulBound Xynklon ↗</a></p>
   </section>;
 }
