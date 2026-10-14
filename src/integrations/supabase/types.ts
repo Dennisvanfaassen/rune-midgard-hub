@@ -351,6 +351,12 @@ export type Database = {
           },
         ]
       }
+      guild_member_roles: {
+        Row: { user_id: string; role: string; updated_at: string }
+        Insert: { user_id: string; role?: string; updated_at?: string }
+        Update: { user_id?: string; role?: string; updated_at?: string }
+        Relationships: []
+      }
       profiles: {
         Row: {
           avatar_path: string | null
@@ -443,6 +449,9 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
+      guild_my_role: { Args: Record<string, never>; Returns: string }
+      guild_set_role: { Args: { target_user: string; new_role: string }; Returns: undefined }
+      guild_delete_member: { Args: { target_user: string }; Returns: undefined }
       market_respond_offer: { Args: { p_offer: string; p_action: string }; Returns: undefined }
       market_withdraw_offer: { Args: { p_offer: string }; Returns: undefined }
       is_party_creator: { Args: { _party: string }; Returns: boolean }
