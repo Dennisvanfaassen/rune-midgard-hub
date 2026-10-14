@@ -26,13 +26,43 @@ export function validateXynklonUrl(raw: string): { url: string; payload: Record<
   } catch { return null; }
 }
 
-export function XynklonBuild({ ownerId, isOwner, saved, onSaved }: { ownerId: string; isOwner: boolean; saved: string | null; onSaved: () => void }) {
+type SlotItem = { slot: string; key: string; refine: number; cards: string[] };
+type GearRecord = { item_key: string; status: string };
+const LABELS: Record<string, string> = { weapon: "Weapon", left: "Off-hand / Shield", headTop: "Upper headgear", headMid: "Middle headgear", headLow: "Lower headgear", armor: "Armor", garment: "Garment", shoes: "Shoes", acc1: "Accessory 1", acc2: "Accessory 2" };
+const STATS = ["STR", "AGI", "VIT", "INT", "DEX", "LUK"];
+function itemName(key: string) { return key.replace(/_+$/, "").replace(/_+/g, " ").replace(/([a-z])([A-Z])/g, "$1 $2").trim(); }
+function extractEquipment(payload: Record<string, unknown>): SlotItem[] {
+  const equipment = payload.e;
+  if (!equipment || typeof equipment !== "object" || Array.isArray(equipment)) return [];
+  return Object.entries(equipment as Record<string, unknown>).flatMap(([slot, val]) => {
+    const raw = Array.isArray(val) ? val[0] : val;
+    if (typeof raw !== "string" || !raw || raw.length > 120) return [];
+    const refine = Array.isArray(val) && typeof val[1] === "number" ? Math.max(0, Math.min(20, val[1])) : 0;
+    const cards = Array.isArray(val) && Array.isArray(val[2]) ? val[2].filter((x): x is string => typeof x === "string" && x.length < 120) : [];
+    return [{ slot, key: raw, refine, cards }];
+  });
+}
+export function XynklonBuild({ ownerId, isOwner, saved, onSaved, job, wishlist, onGearChanged }: { ownerId: string; isOwner: boolean; saved: string | null; onSaved: () => void; job: string; wishlist: GearRecord[]; onGearChanged: () => void }) {
   const [editing, setEditing] = useState(false);
   const [value, setValue] = useState(saved ?? "");
   const [busy, setBusy] = useState(false);
   const qc = useQueryClient();
   const build = saved ? validateXynklonUrl(saved) : null;
-  const entries = build ? Object.entries(build.payload).filter(([key, v]) => key !== "v" && (typeof v === "number" || typeof v === "string" || typeof v === "boolean")).slice(0, 16) : [];
+  const stats = build && Array.isArray(build.payload.s) && build.payload.s.length === 6 && build.payload.s.every((x) => typeof x === "number" && Number.isFinite(x)) ? build.payload.s as number[] : null;
+  const equipment = build ? extractEquipment(build.payload) : [];
+  const [gearBusy, setGearBusy] = useState<string | null>(null);
+  const statusOf = (key: string) => wishlist.find((g) => g.item_key === key)?.status;
+  async function setGear(key: string, status: "have" | "need") {
+    if (!isOwner) return;
+    setGearBusy(key);
+    const { error } = await supabase.from("gear_wishlist").upsert({
+      user_id: ownerId, item_key: key, item_name: itemName(key),
+      item_type: key.includes("Card") ? "Card" : "Equipment", status
+    }, { onConflict: "user_id,item_key" });
+    setGearBusy(null);
+    if (error) toast.error(error.message);
+    else onGearChanged();
+  }
 
   async function save(url: string | null) {
     const parsed = url ? validateXynklonUrl(url) : null;
@@ -57,7 +87,20 @@ export function XynklonBuild({ ownerId, isOwner, saved, onSaved }: { ownerId: st
     </div>
     {build && <div className="mt-4 space-y-3">
       <Button asChild><a href={build.url} target="_blank" rel="noopener noreferrer">Open stats & skills in Xynklon <ExternalLink className="ml-2 h-4 w-4" /></a></Button>
-      {entries.length ? <div className="flex flex-wrap gap-2 text-sm">{entries.map(([k, v]) => <span key={k} className="rounded bg-secondary px-2 py-1">{k}: {String(v)}</span>)}</div> : <p className="text-xs text-muted-foreground">This shared link contains a calculator version marker but no readable stats or skills. Open it in Xynklon to see the builder.</p>}
+      <div className="rounded-md bg-secondary/40 p-3"><div className="text-xs uppercase text-muted-foreground">Character class (guild profile)</div><strong className="text-lg text-primary">{job}</strong><p className="text-xs text-muted-foreground">This calculator link does not specify a class; change it under Edit profile.</p></div>
+      {stats && <div><h3 className="mb-2 font-semibold">Base stats</h3><div className="grid grid-cols-3 gap-2 sm:grid-cols-6">{stats.map((n, i) => <div key={STATS[i]} className="rounded-md border border-border bg-secondary/50 p-3 text-center"><div className="text-xs font-bold text-muted-foreground">{STATS[i]}</div><div className="text-xl font-bold text-primary">{n}</div></div>)}</div></div>}
+      {equipment.length > 0 && <div className="space-y-2"><h3 className="font-semibold">Planned equipment</h3><p className="text-xs text-muted-foreground">Mark each item or card as owned or still needed. Repeated copies of the same item share one wishlist status.</p>
+        {equipment.map((item) => <div key={item.slot} className="rounded-md border border-border p-3">
+          <div className="mb-2 text-xs uppercase tracking-wide text-muted-foreground">{LABELS[item.slot] ?? item.slot}</div>
+          {[item.key, ...item.cards].map((key, i) => <div key={i} className="flex flex-wrap items-center gap-2 border-t border-border/50 py-2 text-sm">
+            <span className="min-w-0 flex-1 font-medium">{i === 0 && item.refine ? `+${item.refine} ` : ""}{itemName(key)}{i > 0 ? " (card)" : ""}</span>
+            {statusOf(key) && <span className={statusOf(key) === "have" ? "text-xs text-success" : "text-xs text-destructive"}>{statusOf(key) === "have" ? "I have this" : "Still need"}</span>}
+            {isOwner && <div className="flex gap-1"><Button size="sm" variant={statusOf(key) === "have" ? "default" : "outline"} disabled={gearBusy === key} onClick={() => setGear(key, "have")}>I have this</Button><Button size="sm" variant={statusOf(key) === "need" ? "default" : "outline"} disabled={gearBusy === key} onClick={() => setGear(key, "need")}>Still need</Button></div>}
+          </div>)}
+        </div>)}
+      </div>}
+      {!stats && equipment.length === 0 && <p className="text-xs text-muted-foreground">This link has no readable stat or equipment values. Open it in Xynklon to view the build.</p>}
+      <p className="text-xs text-muted-foreground">Skill allocations are not present in this export and cannot be displayed automatically.</p>
     </div>}
     {!build && <p className="mt-3 text-sm text-muted-foreground">{saved ? "This previously saved link is invalid." : "No Xynklon build linked yet."} {isOwner && "Make a build in Xynklon, copy its share URL and add it here."}</p>}
     {editing && isOwner && <div className="mt-4 space-y-3 rounded-md border border-border bg-secondary/30 p-3">
