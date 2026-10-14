@@ -162,16 +162,29 @@ function NewParty() {
     const p = schema.safeParse(f);
     if (!p.success) { toast.error(p.error.issues[0]?.message ?? "Invalid input"); return; }
     if (roles.length < 1 || roles.length > MAX_PARTY_SIZE) { toast.error("A party has 1 to 12 slots"); return; }
+    const startsAt = new Date(`${f.date}T${f.time}`);
+    if (Number.isNaN(startsAt.getTime()) || startsAt.getTime() <= Date.now()) { toast.error("Choose a valid future party date and time"); setStep(1); setQuick(false); return; }
     setBusy(true);
     const { data, error } = await supabase.from("parties").insert({
       creator_id: userId, title: p.data.title, place: p.data.place, notes: p.data.notes || null, template, signup_mode: signupMode, checklist,
-      starts_at: new Date(`${f.date}T${f.time}`).toISOString(),
+      starts_at: startsAt.toISOString(),
     }).select("id").single();
     if (error || !data) { setBusy(false); toast.error(error?.message ?? "Could not create party"); return; }
     const { error: e2 } = await supabase.from("party_slots").insert(roles.map((role, position) => ({ party_id: data.id, position, role })));
+    if (e2) {
+      const { error: cleanupError } = await supabase.from("parties").delete().eq("id", data.id).eq("creator_id", userId);
+      setBusy(false);
+      toast.error(cleanupError ? `Could not save party slots: ${e2.message}. A partial party may remain; check My Parties.` : `Could not save party slots: ${e2.message}. No party was published.`);
+      return;
+    }
+    await qc.invalidateQueries({ queryKey: ["parties"] });
     setBusy(false);
-    if (e2) { toast.error(e2.message); return; }
-    announce({ data: { partyId: data.id, origin: window.location.origin } }).then((r) => { if (r.sent) toast.success("Posted to Discord #party-planner"); else toast.error(`Not posted to Discord: ${DISCORD_REASON[r.reason ?? ""] ?? "unknown problem"}`); }).catch((e) => toast.error(`Not posted to Discord: ${e instanceof Error ? e.message : "network error"}`));
+    toast.success("Party published on the website!");
+    // Discord delivery is optional and cannot block a saved party.
+    announce({ data: { partyId: data.id, origin: window.location.origin } }).then((r) => {
+      if (r.sent) toast.success("Party announced on Discord");
+      else toast.warning(`Party saved, but Discord was not notified: ${DISCORD_REASON[r.reason ?? ""] ?? "Unknown reason"}`);
+    }).catch((e) => toast.warning(`Party saved, but Discord was not notified: ${e instanceof Error ? e.message : "network error"}`));
     remember(template);
     localStorage.setItem("last-created-guild-party", JSON.stringify({ title: p.data.title, place: p.data.place, notes: p.data.notes, roles, signupMode, checklist, template }));
     navigate({ to: "/parties/$id", params: { id: data.id } });
