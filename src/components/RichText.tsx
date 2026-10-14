@@ -88,7 +88,7 @@ export function RichContent({ html }: { html: string }) {
   }, [html, prefix]);
   if (article === null) return <div className="h-6 animate-pulse rounded bg-secondary" />;
   return <div>
-    {article.headings.length >= 2 && <nav aria-label="Article table of contents" className="forum-toc mb-6 rounded-lg border border-border bg-secondary/40 p-4">
+    {article.headings.length >= 2 && <nav id={`${prefix}-toc`} aria-label="Article table of contents" className="forum-toc mb-6 rounded-lg border border-border bg-secondary/40 p-4">
       <div className="mb-3 text-sm font-bold uppercase tracking-wide text-primary">Jump to section</div>
       <ul className="grid gap-1 sm:grid-cols-2">
         {article.headings.map((heading) => <li key={heading.id} className={heading.level === 3 ? "pl-4" : ""}>
@@ -99,7 +99,7 @@ export function RichContent({ html }: { html: string }) {
     </nav>}
     <div className="rich-content" dangerouslySetInnerHTML={{ __html: article.html }} />
     {article.headings.length >= 2 && <a className="mt-5 inline-block text-xs text-primary hover:underline"
-      href={`#${article.headings[0].id}`}>↑ Back to first section</a>}
+      href={`#${prefix}-toc`}>↑ Back to section navigation</a>}
   </div>;
 }
 
