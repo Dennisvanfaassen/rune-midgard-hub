@@ -1,1 +1,6 @@
 project_id = "nujlvquafmevjclnespl"
+
+[auth]
+# Guild signups: minimum allowed by Supabase, no required character classes.
+minimum_password_length = 6
+password_requirements = ""
