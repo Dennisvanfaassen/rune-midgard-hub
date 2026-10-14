@@ -5,7 +5,6 @@ import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/lib/auth";
 import { Button } from "@/components/ui/button";
-import { JobSelect } from "@/components/JobSelect";
 import { useServerFn } from "@tanstack/react-start";
 import { announceParty, DISCORD_REASON } from "@/lib/discord.functions";
 import { MAX_PARTY_SIZE, partyCutoff, canAddSlot, jobName, formatPartyTime, partyCountdown } from "@/lib/ro/jobs";
@@ -62,7 +61,6 @@ function PartyPage() {
     enabled: !!userId,
     queryFn: async () => (await supabase.from("profiles").select("job,char_name,display_name").eq("id", userId ?? "").maybeSingle()).data,
   });
-  const [job, setJob] = useState("Knight");
   const [joining, setJoining] = useState(false);
   const readiness = useQuery({
     queryKey: ["party-readiness", id],
@@ -88,7 +86,6 @@ function PartyPage() {
   const waitlist = useQuery({ queryKey: ["party-waitlist",id], refetchInterval: 30_000,
     queryFn: async () => { const {data,error}=await supabase.from("party_waitlist").select("*,profiles(display_name)").eq("party_id",id).order("created_at"); if(error) throw error; return data ?? []; }
   });
-  useEffect(() => { if (me.data?.job) setJob(me.data.job); }, [me.data?.job]);
 
   if (isLoading) return <main className="mx-auto max-w-4xl px-4 py-10 text-muted-foreground">Loading…</main>;
   if (partyError) return <main className="mx-auto max-w-4xl px-4 py-10 text-destructive">Could not load party: {partyLoadError instanceof Error ? partyLoadError.message : String((partyLoadError as {message?:string})?.message ?? partyLoadError)}</main>;
@@ -100,14 +97,17 @@ function PartyPage() {
   const reserve = (waitlist.data ?? []).find((w) => w.user_id === userId);
   const refresh = () => qc.invalidateQueries({ queryKey: key });
 
-  async function join() {
+  async function join(slotId: string | null, desiredRole = "Any") {
     if (!userId || joining) return;
     setJoining(true);
-    const {data,error}=await supabase.rpc("party_signup",{_party:id,_job:job,_char_name:me.data?.char_name || me.data?.display_name || ""});
+    const { data, error } = await supabase.rpc("party_signup_role", {
+      _party: id, _slot: slotId, _waitlist_role: desiredRole,
+      _char_name: me.data?.char_name || me.data?.display_name || ""
+    });
     setJoining(false);
-    if(error) toast.error(error.message);
-    else toast.success(data === "joined" ? "You're in the party!" : "You're on the substitute list. We'll move you into an open spot automatically.");
-    await Promise.all([refresh(), qc.invalidateQueries({queryKey:["party-waitlist",id]})]);
+    if (error) toast.error(error.message);
+    else toast.success(data === "joined" ? "You're confirmed for that spot!" : "You've joined the substitute list. You will be considered when a spot opens.");
+    await Promise.all([refresh(), qc.invalidateQueries({ queryKey: ["party-waitlist", id] })]);
   }
   async function leave(memberId?: string) {
     const {error}=await supabase.rpc("party_leave",{_party:id,_member:memberId || null});
@@ -126,7 +126,7 @@ function PartyPage() {
       <h1 className="mt-2 text-4xl font-bold">{party.title}</h1>
       <p className="mt-2 text-muted-foreground">{formatPartyTime(party.starts_at)} · {party.place} · organised by {party.profiles?.display_name}</p>
       <p className="mt-2 font-semibold text-primary">{partyCountdown(party.starts_at)}</p>
-      <p className="mt-3 text-sm text-muted-foreground">{party.signup_mode === "open" ? "Anyone can join · First come, first served" : "Core classes have priority · Other classes can join the substitute list"}</p>
+      <p className="mt-3 text-sm text-muted-foreground">{party.signup_mode === "open" ? "Anyone can join · First come, first served" : "Choose any open role, regardless of profile class · Substitute list available"}</p>
       {Array.isArray(party.checklist) && party.checklist.length > 0 && <section className="mt-5 rounded-xl border border-border bg-card p-5">
         <h2 className="text-lg font-semibold">Bring these items</h2>
         <p className="mb-3 text-sm text-muted-foreground">Please prepare your own supplies before the run.</p>
@@ -136,14 +136,14 @@ function PartyPage() {
 
       <div className="mt-8 flex flex-wrap items-center gap-3">
         <h2 className="text-2xl font-bold">Members {slots.filter((s) => s.user_id).length}/{slots.length}</h2>
-        {userId ? (
-          <div className="ml-auto flex items-center gap-2 text-sm"><span className="text-muted-foreground">Join as</span><JobSelect value={job} onChange={setJob} /></div>
-        ) : <Button asChild size="sm" variant="outline" className="ml-auto"><Link to="/auth">Sign in to join</Link></Button>}
+        <p className="text-sm text-muted-foreground">Choose the role you will play. Your profile class never restricts your signup.</p>
       </div>
-      {userId && <div className="mt-4 flex flex-wrap items-center gap-3 rounded-xl border border-border bg-card p-4">
-        <div className="flex-1 text-sm">{mine ? "You're confirmed for this party." : reserve ? "You're on the substitute list. If a matching place opens, you will be moved in automatically." : "Sign up even if all 12 places are taken or your class isn't needed."}</div>
-        {mine || reserve ? <Button variant="outline" onClick={()=>leave()}>Cancel sign-up</Button> : <Button disabled={joining} onClick={join}>{joining ? "Joining…" : "Sign up"}</Button>}
-      </div>}
+      {userId ? <div className="mt-4 flex flex-wrap items-center gap-3 rounded-xl border border-border bg-card p-4">
+        <div className="flex-1 text-sm">{mine ? "You're confirmed for this party." : reserve ? "You're on the substitute list." : "Select Join this role on an open slot, or volunteer as a substitute even when slots are available."}</div>
+        {mine || reserve
+          ? <Button variant="outline" onClick={() => leave()}>Cancel sign-up</Button>
+          : <Button variant="outline" disabled={joining} onClick={() => join(null, "Any")}>Put me on the substitution list</Button>}
+      </div> : <Button asChild size="sm" variant="outline" className="mt-4"><Link to="/auth">Sign in to join</Link></Button>}
       {mine && <section className="mt-4 rounded-xl border border-border bg-card p-4">
         <h2 className="mb-3 font-semibold">My party readiness</h2>
         <div className="flex flex-wrap gap-5 text-sm">
@@ -164,6 +164,7 @@ function PartyPage() {
               ) : <div className="text-sm text-muted-foreground">Open slot</div>}
             </div>
 
+            {!s.user_id && !!userId && !mine && !reserve && <Button size="sm" disabled={joining} onClick={() => join(s.id, s.role)}>Join this role</Button>}
             {s.user_id && (s.user_id === userId || isCreator) && <Button size="sm" variant="ghost" onClick={() => leave(s.user_id!)}>{s.user_id === userId ? "Leave" : "Remove"}</Button>}
             {isCreator && !s.user_id && <Button size="sm" variant="ghost" onClick={async () => { await supabase.from("party_slots").delete().eq("id", s.id); refresh(); }}>✕</Button>}
           </div>
@@ -171,10 +172,10 @@ function PartyPage() {
       </div>
       <section className="mt-8 rounded-xl border border-border bg-card p-5">
         <h2 className="text-xl font-bold">Substitutes <span className="text-muted-foreground">({(waitlist.data ?? []).length})</span></h2>
-        <p className="mt-1 text-sm text-muted-foreground">Players are automatically promoted in signup order when an eligible place becomes available.</p>
+        <p className="mt-1 text-sm text-muted-foreground">Substitutes who selected a matching role get priority; otherwise the earliest available substitute is promoted. No profile-class restrictions.</p>
         {(waitlist.data ?? []).length === 0 ? <p className="mt-4 text-sm text-muted-foreground">No substitutes yet.</p> :
           <ol className="mt-4 space-y-2">{(waitlist.data ?? []).map((w,i)=><li key={w.id} className="flex items-center gap-3 rounded-lg bg-secondary/40 px-3 py-2 text-sm">
-            <span className="text-muted-foreground">{i+1}.</span><span className="flex-1 font-medium">{w.char_name || w.profiles?.display_name} <span className="font-normal text-muted-foreground">· {jobName(w.job)}</span></span>
+            <span className="text-muted-foreground">{i+1}.</span><span className="flex-1 font-medium">{w.char_name || w.profiles?.display_name} <span className="font-normal text-muted-foreground">· Preferred: {jobName(w.job)}</span></span>
             {(isCreator || w.user_id===userId) && <Button size="sm" variant="ghost" onClick={()=>leave(w.user_id)}>Remove</Button>}
           </li>)}</ol>}
       </section>
