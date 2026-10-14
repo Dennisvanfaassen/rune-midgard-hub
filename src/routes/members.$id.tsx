@@ -82,13 +82,16 @@ function Profile() {
                 <span className={"rounded px-2 py-0.5 text-xs font-semibold " + (g.status === "have" ? "bg-success/20 text-success" : "bg-destructive/20 text-destructive")}>
                   {g.status === "have" ? "I have this" : "Still need"}
                 </span>
-                <span className="font-semibold">{itemDisplay(g.item_key, g.item_name)}</span>
+                <span className="font-semibold">{itemDisplay(g.item_key, g.item_name)} <span className="text-primary">×{g.quantity ?? 1}</span></span>
                 {g.status === "need" && item?.drops?.length ? (
                   <span className="text-xs text-muted-foreground">Drops from: {item.drops.map(([m, r]) => `${engine?.mobNames[m] ?? m} (${(r / 100).toFixed(2)}%)`).join(", ")}</span>
                 ) : null}
                 {g.status === "need" && <div className="basis-full"><HelpOffers wishlistId={g.id} owner={id} offers={g.wishlist_help as HelpOffer[]} onChange={refresh} /></div>}
                 {isOwner && (
-                  <div className="ml-auto flex gap-2">
+                  <div className="ml-auto flex flex-wrap items-center gap-2">
+                    <label className="flex items-center gap-1 text-xs text-muted-foreground">Qty
+                      <Input aria-label={`Quantity for ${g.item_name}`} type="number" min={1} max={9999} defaultValue={g.quantity ?? 1} key={`${g.id}-${g.quantity ?? 1}`} className="h-8 w-20" onBlur={async (e) => { const count = Number(e.currentTarget.value); if (!Number.isInteger(count) || count < 1 || count > 9999) { toast.error("Quantity must be between 1 and 9999"); e.currentTarget.value = String(g.quantity ?? 1); return; } if (count === (g.quantity ?? 1)) return; const { error } = await supabase.from("gear_wishlist").update({ quantity: count }).eq("id", g.id).eq("user_id", id); if (error) toast.error(error.message); else refresh(); }} />
+                    </label>
                     <Button size="sm" variant="outline" onClick={async () => {
                       const { error } = await supabase.from("gear_wishlist").update({ status: g.status === "have" ? "need" : "have" }).eq("id", g.id); if (error) toast.error(error.message); else refresh();
                     }}>{g.status === "have" ? "Mark as needed" : "I have this now"}</Button>
@@ -153,6 +156,7 @@ function EditProfile({ p, onSaved }: { p: { id: string; display_name: string; ch
 
 function AddGear({ engine, userId, onAdded }: { engine: Engine; userId: string; onAdded: () => void }) {
   const [q, setQ] = useState("");
+  const [quantity, setQuantity] = useState(1);
   const results = useMemo(() => {
     const needle = q.trim().toLowerCase();
     if (needle.length < 2) return [];
@@ -175,12 +179,18 @@ function AddGear({ engine, userId, onAdded }: { engine: Engine; userId: string; 
     ).slice(0, 20);
   }, [q, engine]);
   async function add(key: string, name: string, type: string, status: "have" | "need") {
-    const { error } = await supabase.from("gear_wishlist").upsert({ user_id: userId, item_key: key, item_name: name, item_type: type, status }, { onConflict: "user_id,item_key" });
-    if (error) toast.error(error.message); else { setQ(""); onAdded(); }
+    if (!Number.isInteger(quantity) || quantity < 1 || quantity > 9999) { toast.error("Quantity must be between 1 and 9999"); return; }
+    const { error } = await supabase.from("gear_wishlist").upsert({ user_id: userId, item_key: key, item_name: name, item_type: type, status, quantity }, { onConflict: "user_id,item_key" });
+    if (error) toast.error(error.message); else { setQ(""); setQuantity(1); onAdded(); }
   }
   return (
     <div className="mt-4">
-      <Input placeholder="Search gear or cards (e.g. Ring [1], Marc Card)" value={q} onChange={(e) => setQ(e.target.value)} />
+      <div className="flex flex-wrap items-end gap-3">
+        <div className="min-w-40 flex-1"><label className="mb-1 block text-xs text-muted-foreground">Item</label><Input placeholder="Search gear or cards (e.g. Ring [1], Marc Card)" value={q} onChange={(e) => setQ(e.target.value)} /></div>
+        <label className="text-xs text-muted-foreground">Quantity needed
+          <Input type="number" aria-label="Quantity of wishlist items" min={1} max={9999} value={quantity} onChange={(e) => setQuantity(Number(e.target.value))} className="mt-1 w-24" />
+        </label>
+      </div>
       {results.length > 0 && (
         <div className="mt-1 divide-y divide-border rounded-md border border-border">
           {results.map((i) => (
