@@ -62,6 +62,7 @@ function PartyPage() {
     queryFn: async () => (await supabase.from("profiles").select("job,char_name,display_name").eq("id", userId ?? "").maybeSingle()).data,
   });
   const [joining, setJoining] = useState(false);
+  const [subRole, setSubRole] = useState("Any");
   const readiness = useQuery({
     queryKey: ["party-readiness", id],
     queryFn: async () => {
@@ -142,7 +143,13 @@ function PartyPage() {
         <div className="flex-1 text-sm">{mine ? "You're confirmed for this party." : reserve ? "You're on the substitute list." : "Select Join this role on an open slot, or volunteer as a substitute even when slots are available."}</div>
         {mine || reserve
           ? <Button variant="outline" onClick={() => leave()}>Cancel sign-up</Button>
-          : <Button variant="outline" disabled={joining} onClick={() => join(null, "Any")}>Put me on the substitution list</Button>}
+          : <div className="flex flex-wrap items-center gap-2">
+              <label className="text-xs text-muted-foreground" htmlFor="substitute-role">Can cover</label>
+              <select id="substitute-role" className="rounded-md border border-input bg-background px-3 py-2 text-sm" value={subRole} onChange={(e) => setSubRole(e.target.value)}>
+                {["Any", ...new Set(slots.map((s) => s.role).filter((r) => r !== "Any"))].map((role) => <option value={role} key={role}>{role === "Any" ? "Any role" : jobName(role)}</option>)}
+              </select>
+              <Button variant="outline" disabled={joining} onClick={() => join(null, subRole)}>Join substitutes</Button>
+            </div>}
       </div> : <Button asChild size="sm" variant="outline" className="mt-4"><Link to="/auth">Sign in to join</Link></Button>}
       {mine && <section className="mt-4 rounded-xl border border-border bg-card p-4">
         <h2 className="mb-3 font-semibold">My party readiness</h2>
