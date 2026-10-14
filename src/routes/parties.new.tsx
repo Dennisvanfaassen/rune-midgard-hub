@@ -11,7 +11,6 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
-import { fieldClass } from "@/components/JobSelect";
 import { PartyRoleSelect } from "@/components/PartyRoleSelect";
 import { MAX_PARTY_SIZE, PARTY_TEMPLATES, canAddSlot } from "@/lib/ro/jobs";
 
@@ -115,7 +114,7 @@ function NewParty() {
     if (/farm|loot|zeny/.test(text)) return "Farming";
     return "Custom";
   }
-  const [signupMode, setSignupMode] = useState<"core" | "open">("core");
+  const [signupMode, setSignupMode] = useState<"core" | "open">("open");
   const [checklist, setChecklist] = useState<{ quantity: number; name: string }[]>([]);
   const [itemName, setItemName] = useState("");
   const [itemQty, setItemQty] = useState(1);
@@ -278,9 +277,9 @@ function NewParty() {
       {(quick || step === 2) && <>
       <section className="mt-8 rounded-xl border border-border bg-card p-5">
         <h2 className="text-xl font-bold">Who can join?</h2>
-        <p className="mt-1 text-sm text-muted-foreground">Choose whether class requirements matter. Everyone can always join the substitute list.</p>
+        <p className="mt-1 text-sm text-muted-foreground">Choose how to organise the roster. Profile classes never restrict signups; everyone can join the substitute list.</p>
         <div className="mt-4 grid gap-3 sm:grid-cols-2">
-          {([["core","Core classes have priority","Only matching classes fill reserved slots. Others join the substitute list."],["open","Anyone can join","First come, first served, regardless of required class."]] as const).map(([value,title,description]) => (
+          {([["core","Core roles have priority","Organisers reserve specific roles. Members choose their role directly; others can volunteer as substitutes."],["open","Anyone can join","Members pick any open role; extra volunteers join the substitute list."]] as const).map(([value,title,description]) => (
             <button type="button" key={value} onClick={() => setSignupMode(value)} aria-pressed={signupMode === value} className={`rounded-lg border p-4 text-left transition-colors ${signupMode === value ? "border-primary bg-primary/10" : "border-border hover:border-primary/50"}`}>
               <span className="font-semibold">{title}</span>
               <span className="mt-1 block text-sm text-muted-foreground">{description}</span>
