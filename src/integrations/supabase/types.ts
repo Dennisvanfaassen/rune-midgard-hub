@@ -184,6 +184,8 @@ export type Database = {
       }
       parties: {
         Row: {
+          signup_mode: string
+          checklist: Json
           created_at: string
           creator_id: string
           id: string
@@ -221,6 +223,15 @@ export type Database = {
             referencedRelation: "profiles"
             referencedColumns: ["id"]
           },
+        ]
+      }
+      party_waitlist: {
+        Row: { id: string; party_id: string; user_id: string; job: string; char_name: string | null; created_at: string }
+        Insert: { id?: string; party_id: string; user_id: string; job: string; char_name?: string | null; created_at?: string }
+        Update: { id?: string; party_id?: string; user_id?: string; job?: string; char_name?: string | null; created_at?: string }
+        Relationships: [
+          { foreignKeyName: "party_waitlist_party_id_fkey"; columns: ["party_id"]; isOneToOne: false; referencedRelation: "parties"; referencedColumns: ["id"] },
+          { foreignKeyName: "party_waitlist_user_id_fkey"; columns: ["user_id"]; isOneToOne: false; referencedRelation: "profiles"; referencedColumns: ["id"] }
         ]
       }
       party_slots: {
@@ -270,6 +281,8 @@ export type Database = {
       }
       party_templates: {
         Row: {
+          signup_mode: string
+          checklist: Json
           created_at: string
           creator_id: string
           description: string
@@ -396,6 +409,10 @@ export type Database = {
     }
     Functions: {
       is_party_creator: { Args: { _party: string }; Returns: boolean }
+      party_job_matches: { Args: { p_role: string; p_job: string }; Returns: boolean }
+      party_promote: { Args: { _party: string }; Returns: undefined }
+      party_signup: { Args: { _party: string; _job: string; _char_name?: string | null }; Returns: string }
+      party_leave: { Args: { _party: string; _member?: string | null }; Returns: undefined }
     }
     Enums: {
       [_ in never]: never
