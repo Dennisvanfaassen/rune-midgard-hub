@@ -40,6 +40,7 @@ function Profile() {
     queryKey: ["profile", id],
     queryFn: async () => (await supabase.from("profiles").select("*").eq("id", id).maybeSingle()).data,
   });
+  const guildRole = useQuery({ queryKey: ["guild-member-roles", id], queryFn: async () => { const { data, error } = await supabase.from("guild_member_roles").select("role").eq("user_id", id).maybeSingle(); if (error) return "Guildmember"; return data?.role ?? "Guildmember"; } });
   const gear = useQuery({
     queryKey: ["gear", id],
     queryFn: async () => (await supabase.from("gear_wishlist").select("*,wishlist_help(id,kind,helper_id,message,profiles(display_name,char_name))").eq("user_id", id).order("created_at")).data ?? [],
@@ -59,7 +60,7 @@ function Profile() {
         <div className="flex items-center gap-6">
         <CharacterPortrait path={p.avatar_path} name={p.char_name || p.display_name} className="h-36 w-28" />
         <div className="min-w-0"><h1 className="text-4xl font-bold">{p.char_name || p.display_name}</h1>
-        <p className="mt-1 text-primary">{jobName(p.job)} · Base {p.base_lv} / Job {p.job_lv}</p>
+        <p className="mt-1 text-primary">{jobName(p.job)} · Base {p.base_lv} / Job {p.job_lv} · {guildRole.data ?? "Guildmember"}</p>
         {p.bio && <p className="mt-3 whitespace-pre-line text-muted-foreground">{p.bio}</p>}
         </div></div>
         {isOwner && <ThemePreference />}
