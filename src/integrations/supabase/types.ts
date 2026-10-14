@@ -138,6 +138,24 @@ export type Database = {
           },
         ]
       }
+      market_comments: {
+        Row: { id: string; listing_id: string; author_id: string; body: string; created_at: string }
+        Insert: { id?: string; listing_id: string; author_id: string; body: string; created_at?: string }
+        Update: { id?: string; listing_id?: string; author_id?: string; body?: string; created_at?: string }
+        Relationships: [
+          { foreignKeyName: "market_comments_listing_id_fkey"; columns: ["listing_id"]; isOneToOne: false; referencedRelation: "market_listings"; referencedColumns: ["id"] },
+          { foreignKeyName: "market_comments_author_id_fkey"; columns: ["author_id"]; isOneToOne: false; referencedRelation: "profiles"; referencedColumns: ["id"] }
+        ]
+      }
+      market_offers: {
+        Row: { id: string; listing_id: string; buyer_id: string; amount: number; message: string | null; status: string; created_at: string; responded_at: string | null }
+        Insert: { id?: string; listing_id: string; buyer_id: string; amount: number; message?: string | null; status?: string; created_at?: string; responded_at?: string | null }
+        Update: { id?: string; listing_id?: string; buyer_id?: string; amount?: number; message?: string | null; status?: string; created_at?: string; responded_at?: string | null }
+        Relationships: [
+          { foreignKeyName: "market_offers_listing_id_fkey"; columns: ["listing_id"]; isOneToOne: false; referencedRelation: "market_listings"; referencedColumns: ["id"] },
+          { foreignKeyName: "market_offers_buyer_id_fkey"; columns: ["buyer_id"]; isOneToOne: false; referencedRelation: "profiles"; referencedColumns: ["id"] }
+        ]
+      }
       market_listings: {
         Row: {
           created_at: string
@@ -416,6 +434,8 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
+      market_respond_offer: { Args: { p_offer: string; p_action: string }; Returns: undefined }
+      market_withdraw_offer: { Args: { p_offer: string }; Returns: undefined }
       is_party_creator: { Args: { _party: string }; Returns: boolean }
       party_job_matches: { Args: { p_role: string; p_job: string }; Returns: boolean }
       party_promote: { Args: { _party: string }; Returns: undefined }
