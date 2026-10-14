@@ -103,8 +103,25 @@ function NewParty() {
   const announce = useServerFn(announceParty);
   const templates = useQuery({ queryKey: ["party-templates"], queryFn: async () => { const { data, error } = await supabase.from("party_templates").select("*").order("created_at"); if (error) throw error; return data; } });
   const allTemplates = [...PARTY_TEMPLATES, ...(templates.data ?? [])];
-  const filteredTemplates = allTemplates.filter((t) => (t.name + " " + (t.description || "")).toLowerCase().includes(templateFilter.toLowerCase()) || templateCategory(t).toLowerCase().includes(templateFilter.toLowerCase()));
+  const filteredTemplates = allTemplates.filter((t) => !archiveIds.includes(t.id) && ((t.name + " " + (t.description || "")).toLowerCase().includes(templateFilter.toLowerCase()) || templateCategory(t).toLowerCase().includes(templateFilter.toLowerCase())));
   const [templateName, setTemplateName] = useState("");
+  const [archiveIds, setArchiveIds] = useState<string[]>([]);
+  useEffect(() => { try { setArchiveIds(JSON.parse(localStorage.getItem("party-archived-templates") || "[]")); } catch {} }, []);
+  function toggleArchive(id: string) {
+    const next = archiveIds.includes(id) ? archiveIds.filter((x) => x !== id) : [...archiveIds, id];
+    setArchiveIds(next);
+    localStorage.setItem("party-archived-templates", JSON.stringify(next));
+  }
+  async function updateTemplate() {
+    if (!userId || !templateName.trim()) { toast.error("Enter a template name"); return; }
+    const own = (templates.data ?? []).find((t) => t.id === template && t.creator_id === userId);
+    if (!own) { toast.error("Choose one of your saved templates to update"); return; }
+    setSavingTemplate(true);
+    const { error } = await supabase.from("party_templates").update({ name: templateName.trim(), roles, signup_mode: signupMode, checklist }).eq("id", own.id).eq("creator_id", userId);
+    setSavingTemplate(false);
+    if (error) toast.error(error.message);
+    else { await qc.invalidateQueries({ queryKey: ["party-templates"] }); toast.success("Template updated. Existing parties unchanged."); }
+  }
   const [savingTemplate, setSavingTemplate] = useState(false);
   async function deleteTemplate(id: string) {
     if (!userId || !confirm("Delete this saved template? Existing parties will not change.")) return;
@@ -166,6 +183,8 @@ function NewParty() {
             <div key={t.id} className={`flex gap-2 rounded-lg border p-3 ${template === t.id ? "border-primary bg-primary/5" : "border-border"}`}>
               <button className="min-w-0 flex-1 text-left" onClick={() => applyTemplate(t.id)}><div className="font-semibold">{t.name} · {t.roles.length}/12</div><p className="text-xs text-muted-foreground">{templateCategory(t)} · {t.description || "Member-created setup"}</p></button>
               <Button title="Favorite" variant="ghost" size="sm" onClick={() => toggleFavorite(t.id)}>{favoriteIds.includes(t.id) ? "★" : "☆"}</Button>
+              {"creator_id" in t && t.creator_id === userId && <Button title="Duplicate template" variant="ghost" size="sm" onClick={() => { applyTemplate(t.id); setTemplateName(t.name + " copy"); setStep(2); }}>Copy</Button>}
+              <Button title="Archive locally" variant="ghost" size="sm" onClick={() => toggleArchive(t.id)}>Archive</Button>
               {"creator_id" in t && t.creator_id === userId && <Button title="Delete my template" variant="ghost" size="sm" onClick={() => deleteTemplate(t.id)}>Delete</Button>}
             </div>)}
         </div>
@@ -195,11 +214,13 @@ function NewParty() {
         </div>
       </section>
       <h2 className="mt-8 text-2xl font-bold">Slots <span className="text-base text-muted-foreground">{roles.length}/{MAX_PARTY_SIZE}</span></h2>
+      <div className="mt-3 flex flex-wrap gap-2">{[...new Set(roles)].map((r) => <span key={r} className="rounded-full bg-secondary px-3 py-1 text-sm">{r} ×{roles.filter((x) => x === r).length}</span>)}</div>
       <div className="mt-3 grid gap-2 sm:grid-cols-2">
         {roles.map((r, i) => (
           <div key={i} className="flex items-center gap-2 rounded-md border border-border bg-card p-2">
             <span className="w-6 text-center text-sm text-muted-foreground">{i + 1}</span>
             <PartyRoleSelect value={r} onChange={(v) => setRoles(roles.map((x, j) => (j === i ? v : x)))} className="flex-1" />
+            <Button title="Add another of this role" size="sm" variant="outline" disabled={!canAddSlot(roles.length)} onClick={() => setRoles([...roles, r])}>+</Button>
             <Button size="sm" variant="ghost" disabled={roles.length <= 1} onClick={() => setRoles(roles.filter((_, j) => j !== i))}>Remove</Button>
           </div>
         ))}
@@ -219,7 +240,8 @@ function NewParty() {
       </section>
       <div className="mt-6 flex flex-wrap gap-2">
         <Input aria-label="New template name" placeholder="New template name" maxLength={80} className="max-w-xs" value={templateName} onChange={(e) => setTemplateName(e.target.value)} />
-        <Button variant="outline" disabled={!templateName.trim() || savingTemplate || !userId} onClick={saveTemplate}>Save setup as template</Button>
+        <Button variant="outline" disabled={!templateName.trim() || savingTemplate || !userId} onClick={saveTemplate}>Save new template</Button>
+        {(templates.data ?? []).some((t) => t.id === template && t.creator_id === userId) && <Button variant="outline" disabled={!templateName.trim() || savingTemplate} onClick={updateTemplate}>Update selected template</Button>}
       </div>
       </>}
       {!quick && <div className="mt-6 flex gap-2">{step > 0 && <Button variant="outline" onClick={() => setStep((v) => v-1)}>Back</Button>}{step < 2 && <Button onClick={() => setStep((v) => v+1)}>Continue</Button>}</div>}
