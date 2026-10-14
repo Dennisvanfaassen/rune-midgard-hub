@@ -41,7 +41,7 @@ function NewParty() {
   const { userId, ready } = useAuth();
   const navigate = useNavigate();
   const [f, setF] = useState({ title: "", place: "", notes: "", date: "", time: "20:00" });
-  const [template, setTemplate] = useState("stala");
+  const [template, setTemplate] = useState("");
   const [step, setStep] = useState(0);
   const [activity, setActivity] = useState("leveling");
   const [templateFilter, setTemplateFilter] = useState("");
@@ -76,18 +76,28 @@ function NewParty() {
     localStorage.setItem("party-template-recent", JSON.stringify(next));
   }
   const activities = [
-    { id: "mvp", label: "MVP Hunting", category: "MVP", defaultTemplate: "mvp", place: "MVP spawn location" },
-    { id: "tower", label: "Endless Tower", category: "Endless Tower", defaultTemplate: "mvp", place: "Endless Tower entrance" },
-    { id: "leveling", label: "Leveling", category: "Leveling", defaultTemplate: "leveling", place: "Party meeting point" },
-    { id: "farming", label: "Farming", category: "Farming", defaultTemplate: "dungeon", place: "Farming location" },
-    { id: "custom", label: "Custom", category: "Custom", defaultTemplate: "custom", place: "" },
+    { id: "leveling", label: "Leveling", place: "" },
+    { id: "mvp", label: "MvP Hunting", place: "" },
+    { id: "tower", label: "Endless Tower", place: "Endless Tower entrance" },
   ];
   function applyActivity(id: string) {
-    const a = activities.find((x) => x.id === id)!;
     setActivity(id);
-    setF((v) => ({ ...v, title: v.title || a.label, place: v.place || a.place }));
-    applyTemplate(a.defaultTemplate);
-    if (id === "tower") setChecklist([{ quantity: 50, name: "Green Potion" }, { quantity: 5, name: "Blue Gemstone" }, { quantity: 5, name: "Yggdrasil Leaf" }]);
+    // Do not impose a template when choosing an activity.
+    setTemplate("");
+    setRoles(Array(MAX_PARTY_SIZE).fill("Any"));
+    setChecklist(id === "tower" ? [
+      { quantity: 50, name: "Green Potion" },
+      { quantity: 5, name: "Blue Gemstone" },
+      { quantity: 5, name: "Yggdrasil Leaf" },
+    ] : []);
+    setF((v) => ({ ...v, place: id === "tower" && !v.place ? "Endless Tower entrance" : v.place }));
+  }
+  function clearTemplate() {
+    setTemplate("");
+    setRoles(Array(MAX_PARTY_SIZE).fill("Any"));
+    setSignupMode("open");
+    setChecklist([]);
+    setShowLibrary(false);
   }
   function applyTemplate(id: string) {
     const t = [...PARTY_TEMPLATES, ...(templates.data ?? [])].find((x) => x.id === id);
@@ -152,7 +162,11 @@ function NewParty() {
     await qc.invalidateQueries({ queryKey: ["party-templates"] });
     setTemplate(data.id); remember(data.id); setTemplateName(""); toast.success("Template shared with the guild");
   }
-  const [roles, setRoles] = useState<string[]>(PARTY_TEMPLATES[0]?.roles ?? ["Any"]);
+  const [roles, setRoles] = useState<string[]>(Array(MAX_PARTY_SIZE).fill("Any"));
+  const usage = useQuery({ queryKey: ["party-template-usage"], queryFn: async () => { const { data, error } = await supabase.from("parties").select("template"); if (error) throw error; return data ?? []; } });
+  const usageCount = (id: string) => (usage.data ?? []).filter((p) => p.template === id).length;
+  const popularTemplates = [...allTemplates].sort((a, b) => usageCount(b.id) - usageCount(a.id)).slice(0, 4);
+  const coreRoles = (r: string[]) => { const entries = r.filter((x) => x !== "Any"); return entries.length ? [...new Set(entries)].map((name) => `${name}${entries.filter((x) => x === name).length > 1 ? ` ×${entries.filter((x) => x === name).length}` : ""}`).join(", ") : "No required classes"; };
   const [busy, setBusy] = useState(false);
 
   if (ready && !userId) return <main className="mx-auto max-w-xl px-4 py-16">Please <Link to="/auth" className="text-primary">sign in</Link> to plan a party.</main>;
@@ -201,29 +215,56 @@ function NewParty() {
       </div>
       {!quick && <div className="my-6 flex flex-wrap gap-2">{["Activity & template", "Time & place", "Roster & supplies"].map((name,i) =>
         <Button key={name} size="sm" variant={step === i ? "default" : "outline"} onClick={() => setStep(i)}>{i+1}. {name}</Button>)}</div>}
-      {(quick || step === 0) && <section className="mt-6 space-y-4 rounded-xl border border-border bg-card p-5">
-        <h2 className="text-xl font-bold">Choose an activity</h2>
-        <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">{activities.map((a) =>
-          <button key={a.id} type="button" onClick={() => applyActivity(a.id)} className={`rounded-lg border p-3 text-left text-sm font-semibold ${activity === a.id ? "border-primary bg-primary/10" : "border-border hover:border-primary/50"}`}>{a.label}</button>)}</div>
-        <div className="flex items-center justify-between gap-2"><h2 className="text-xl font-bold">Template library</h2><Button size="sm" variant="outline" onClick={() => setShowLibrary((v) => !v)}>{showLibrary ? "Collapse library" : "Browse all templates"}</Button></div>
-        <div className="flex flex-wrap gap-2">{[...new Set([...favoriteIds, ...recentIds])].slice(0,5).map((id) => {
-          const t = allTemplates.find((x) => x.id === id); return t ? <Button key={id} variant="outline" size="sm" onClick={() => applyTemplate(id)}>{favoriteIds.includes(id) ? "★ " : "Recent: "}{t.name}</Button> : null;
-        })}</div>
-        <div className="flex flex-wrap gap-1">{["all","mine","MVP","Endless Tower","Leveling","Farming","Custom","archived"].map((scope) =>
-          <Button key={scope} size="sm" variant={scope === templateScope ? "default" : "outline"} onClick={() => { setTemplateScope(scope); setShowLibrary(true); }}>{scope === "mine" ? "My templates" : scope === "all" ? "All" : scope === "archived" ? "Archived" : scope}</Button>)}</div>
-        <Input placeholder="Search activity or template" value={templateFilter} onChange={(e) => { setTemplateFilter(e.target.value); setShowLibrary(true); }} />
-        <div className={showLibrary || templateFilter ? "grid max-h-80 gap-2 overflow-auto sm:grid-cols-2" : "grid gap-2 sm:grid-cols-2"}>
-          {(showLibrary || templateFilter ? filteredTemplates : filteredTemplates.filter((t) => t.id === template || favoriteIds.includes(t.id)).slice(0,4)).map((t) =>
-            <div key={t.id} className={`flex gap-2 rounded-lg border p-3 ${template === t.id ? "border-primary bg-primary/5" : "border-border"}`}>
-              <button className="min-w-0 flex-1 text-left" onClick={() => applyTemplate(t.id)}><div className="font-semibold">{t.name} · {t.roles.length}/12</div><p className="text-xs text-muted-foreground">{templateCategory(t)} · {t.description || "Member-created setup"}</p></button>
-              <Button title="Favorite" variant="ghost" size="sm" onClick={() => toggleFavorite(t.id)}>{favoriteIds.includes(t.id) ? "★" : "☆"}</Button>
-              {"creator_id" in t && t.creator_id === userId && <Button title="Duplicate template" variant="ghost" size="sm" onClick={() => { applyTemplate(t.id); setTemplateName(t.name + " copy"); setStep(2); }}>Copy</Button>}
-              <Button title="Archive locally" variant="ghost" size="sm" onClick={() => toggleArchive(t.id)}>{archiveIds.includes(t.id) ? "Restore" : "Archive"}</Button>
-              {"creator_id" in t && t.creator_id === userId && <Button title="Delete my template" variant="ghost" size="sm" onClick={() => deleteTemplate(t.id)}>Delete</Button>}
-            </div>)}
+      {(quick || step === 0) && <section className="mt-6 space-y-6 rounded-xl border border-border bg-card p-5">
+        <div>
+          <h2 className="text-xl font-bold">Choose an activity</h2>
+          <div className="mt-3 grid gap-3 sm:grid-cols-3">
+            {activities.map((a) => <button type="button" key={a.id} onClick={() => applyActivity(a.id)}
+              aria-pressed={activity === a.id}
+              className={`rounded-xl border px-4 py-5 text-left font-semibold transition hover:border-primary ${activity === a.id ? "border-primary bg-primary/10" : "border-border bg-secondary/20"}`}>{a.label}</button>)}
+          </div>
         </div>
-        <p className="text-xs text-muted-foreground">Templates copy their roles and supplies into a new party. Editing this party won't change the template.</p>
+        <div className="border-t border-border pt-5">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div><h2 className="text-xl font-bold">Party template</h2>
+              <p className="mt-1 text-sm text-muted-foreground">{template ? `Selected: ${allTemplates.find((t) => t.id === template)?.name || "Custom"}` : "No template selected — all 12 slots are Any role."}</p></div>
+            <div className="flex gap-2"><Button variant="outline" onClick={clearTemplate}>Use any roles</Button><Button onClick={() => setShowLibrary(true)}>Load templates</Button></div>
+          </div>
+        </div>
+        <div className="border-t border-border pt-5">
+          <h2 className="text-xl font-bold">Most used templates</h2>
+          <p className="mt-1 text-sm text-muted-foreground">The four most-used setups, based on parties created by the guild.</p>
+          <div className="mt-4 grid gap-3 sm:grid-cols-2">
+            {popularTemplates.map((t) => <button key={t.id} type="button" onClick={() => applyTemplate(t.id)}
+              className={`rounded-xl border p-5 text-left transition hover:border-primary ${template === t.id ? "border-primary bg-primary/10" : "border-border bg-secondary/20"}`}>
+              <div className="flex items-center justify-between gap-2"><strong className="text-lg">{t.name}</strong><span className="text-xs text-muted-foreground">{t.roles.length} players</span></div>
+              <p className="mt-2 text-sm text-muted-foreground"><strong className="text-foreground">Core roles:</strong> {coreRoles(t.roles)}</p>
+              <p className="mt-2 text-sm text-primary">{t.roles.filter((r) => r === "Any").length} Any role spots · {usageCount(t.id)} previous parties</p>
+            </button>)}
+          </div>
+        </div>
       </section>}
+      {showLibrary && <div role="presentation" className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 p-3" onMouseDown={(e) => { if (e.target === e.currentTarget) setShowLibrary(false); }}>
+        <div role="dialog" aria-modal="true" aria-label="Party template library" className="max-h-[90vh] w-full max-w-5xl overflow-y-auto rounded-xl border border-border bg-background p-5 shadow-2xl sm:p-7">
+          <div className="flex items-start justify-between gap-4"><div><h2 className="text-2xl font-bold">Load a party template</h2><p className="text-sm text-muted-foreground">Select a template to fill the party slots, or start with 12 Any role slots.</p></div><Button variant="outline" onClick={() => setShowLibrary(false)}>Close</Button></div>
+          <div className="mt-5 flex flex-wrap gap-2">{["all","mine","MVP","Endless Tower","Leveling","Custom","archived"].map((scope) =>
+            <Button key={scope} size="sm" variant={templateScope === scope ? "default" : "outline"} onClick={() => setTemplateScope(scope)}>{scope === "mine" ? "My templates" : scope === "all" ? "All" : scope === "archived" ? "Archived" : scope}</Button>)}</div>
+          <Input className="mt-4" placeholder="Search templates" value={templateFilter} onChange={(e) => setTemplateFilter(e.target.value)} />
+          <div className="mt-4 grid gap-3 sm:grid-cols-2">{filteredTemplates.map((t) => <div key={t.id} className="rounded-xl border border-border bg-card p-5">
+            <div className="flex justify-between gap-2"><h3 className="text-lg font-bold">{t.name}</h3><span className="whitespace-nowrap text-sm text-primary">{t.roles.length} players</span></div>
+            <p className="mt-2 text-sm"><strong>Core roles:</strong> {coreRoles(t.roles)}</p>
+            <p className="mt-2 text-sm text-muted-foreground">{t.roles.filter((r) => r === "Any").length} Any role spots</p>
+            <p className="mt-1 text-xs text-muted-foreground">{t.description}</p>
+            <div className="mt-4 flex flex-wrap gap-2"><Button size="sm" onClick={() => { applyTemplate(t.id); setShowLibrary(false); }}>Use template</Button>
+              <Button size="sm" variant="outline" onClick={() => toggleFavorite(t.id)}>{favoriteIds.includes(t.id) ? "★ Favorite" : "☆ Favorite"}</Button>
+              <Button size="sm" variant="ghost" onClick={() => toggleArchive(t.id)}>{archiveIds.includes(t.id) ? "Restore" : "Archive"}</Button>
+              {"creator_id" in t && t.creator_id === userId && <Button size="sm" variant="ghost" onClick={() => deleteTemplate(t.id)}>Delete</Button>}
+            </div>
+          </div>)}</div>
+          {filteredTemplates.length === 0 && <p className="mt-5 text-sm text-muted-foreground">No templates match this filter.</p>}
+          <Button className="mt-5" variant="outline" onClick={clearTemplate}>Continue without template (12 Any roles)</Button>
+        </div>
+      </div>}
       {(quick || step === 1) && <>
       <div className="mt-6 grid gap-4 rounded-lg border border-border bg-card p-6 sm:grid-cols-2">
         <div className="space-y-1 sm:col-span-2"><Label>Title</Label><Input value={f.title} maxLength={80} placeholder="Baphomet hunt" onChange={(e) => setF({ ...f, title: e.target.value })} /></div>
