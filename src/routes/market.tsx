@@ -32,9 +32,18 @@ function Market() {
   const listings = useListings();
   const [q, setQ] = useState("");
   const [show, setShow] = useState("open");
+  const [sort, setSort] = useState("newest");
   const [open, setOpen] = useState(false);
   const refresh = () => qc.invalidateQueries({ queryKey: ["market"] });
-  const list = (listings.data ?? []).filter((l) => (show === "all" || (show === "mine" ? l.seller_id === userId : l.status === show)) && itemDisplay(l.item_key, l.item_name).toLowerCase().includes(q.toLowerCase()));
+  const list = (listings.data ?? [])
+    .filter((l) => (show === "all" || (show === "mine" ? l.seller_id === userId : show === "free" ? l.status === "open" && l.price === 0 : l.status === show)) && itemDisplay(l.item_key, l.item_name).toLowerCase().includes(q.toLowerCase()))
+    .sort((a, b) => {
+      if (sort === "low") return a.price - b.price || b.created_at.localeCompare(a.created_at);
+      if (sort === "high") return b.price - a.price || b.created_at.localeCompare(a.created_at);
+      if (sort === "name") return itemDisplay(a.item_key, a.item_name).localeCompare(itemDisplay(b.item_key, b.item_name));
+      if (sort === "oldest") return a.created_at.localeCompare(b.created_at);
+      return b.created_at.localeCompare(a.created_at);
+    });
   return <main className="mx-auto max-w-6xl px-4 py-10">
     <div className="flex flex-wrap items-center justify-between gap-3">
       <div><h1 className="text-4xl font-bold">Guild Marketplace</h1><p className="text-muted-foreground">Guild prices for guildmates. Contact the seller in game or on Discord.</p></div>
@@ -43,7 +52,7 @@ function Market() {
     {open && userId && <NewListing userId={userId} onDone={() => { setOpen(false); refresh(); }} />}
     <div className="mt-6 flex flex-wrap gap-3">
       <Input aria-label="Search items" className="max-w-sm" placeholder="Search items" value={q} onChange={(e) => setQ(e.target.value)} />
-      <div className="flex gap-1">{[["open", "For sale"], ["all", "All"], ...(userId ? [["mine", "My listings"]] : [])].map(([k, label]) => <Button key={k} size="sm" variant={show === k ? "default" : "outline"} onClick={() => setShow(k ?? "open")}>{label}</Button>)}</div>
+      <div className="flex gap-1">{[["open", "For sale"], ["free", "Free items"], ["all", "All"]], ...(userId ? [["mine", "My listings"]] : [])].map(([k, label]) => <Button key={k} size="sm" variant={show === k ? "default" : "outline"} onClick={() => setShow(k ?? "open")}>{label}</Button>)}</div>
     </div>
     {listings.isLoading && <p className="mt-6 text-muted-foreground">Loading…</p>}
     {listings.isError && <p className="mt-6 text-destructive">Could not load the marketplace.</p>}
@@ -60,14 +69,15 @@ function NewListing({ userId, onDone }: { userId: string; onDone: () => void }) 
   const [search, setSearch] = useState("");
   const [item, setItem] = useState<RoItem | null>(null);
   const [f, setF] = useState({ quantity: "1", price: "", note: "" });
+  const [isFree, setIsFree] = useState(false);
   const [busy, setBusy] = useState(false);
   const results = useMemo(() => !engine || search.length < 2 || item ? [] : engine.items.filter((i) => i.name.toLowerCase().includes(search.toLowerCase())).slice(0, 10), [engine, search, item]);
   async function submit() {
     const name = item ? itemLabel(item) : search.trim();
-    const price = Math.round(Number(f.price.replace(/[^\d]/g, "")));
+    const price = isFree ? 0 : Math.round(Number(f.price.replace(/[^\d]/g, "")));
     const quantity = Math.round(Number(f.quantity));
     if (!name) { toast.error("Choose an item"); return; }
-    if (!Number.isFinite(price) || f.price.trim() === "" || price < 0) { toast.error("Enter your asking price in zeny"); return; }
+    if (!Number.isFinite(price) || (!isFree && (f.price.trim() === "" || price <= 0))) { toast.error("Enter your asking price in zeny"); return; }
     if (!(quantity >= 1 && quantity <= 30000)) { toast.error("Quantity must be 1 to 30,000"); return; }
     setBusy(true);
     const { error } = await supabase.from("market_listings").insert({ seller_id: userId, item_key: item?.key ?? `custom:${name}`, item_name: name, quantity, price, note: f.note.trim() || null });
@@ -82,8 +92,12 @@ function NewListing({ userId, onDone }: { userId: string; onDone: () => void }) 
       </div>}
     </div>
     <div className="space-y-1"><Label>Quantity</Label><Input type="number" min={1} max={30000} value={f.quantity} onChange={(e) => setF({ ...f, quantity: e.target.value })} /></div>
-    <div className="space-y-1"><Label>Total price (zeny)</Label><Input inputMode="numeric" placeholder="e.g. 250000" value={f.price} onChange={(e) => setF({ ...f, price: e.target.value })} /></div>
+    <div className="space-y-1">
+      <Label>Total price (zeny)</Label>
+      <Input inputMode="numeric" disabled={isFree} placeholder={isFree ? "FREE" : "e.g. 250000"} value={isFree ? "" : f.price} onChange={(e) => setF({ ...f, price: e.target.value })} />
+      <label className="flex cursor-pointer items-center gap-2 pt-2 text-sm"><input type="checkbox" checked={isFree} onChange={(e) => { setIsFree(e.target.checked); if (e.target.checked) setF((prev) => ({ ...prev, price: "" })); }} /> Give away for free (0 Zeny)</label>
+    </div>
     <div className="space-y-1 sm:col-span-4"><Label>Note</Label><Textarea maxLength={500} placeholder="Refine, cards, where to meet…" value={f.note} onChange={(e) => setF({ ...f, note: e.target.value })} /></div>
-    <div className="sm:col-span-4"><Button disabled={busy} onClick={submit}>List item{f.price && Number.isFinite(+f.price.replace(/[^\d]/g, "")) ? ` for ${formatZeny(+f.price.replace(/[^\d]/g, ""))}` : ""}</Button></div>
+    <div className="sm:col-span-4"><Button disabled={busy} onClick={submit}>List item{isFree ? " for FREE" : f.price && Number.isFinite(+f.price.replace(/[^\d]/g, "")) ? ` for ${formatZeny(+f.price.replace(/[^\d]/g, ""))}` : ""}</Button></div>
   </div>;
 }
