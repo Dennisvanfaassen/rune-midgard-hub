@@ -42,6 +42,10 @@ function NewParty() {
   const navigate = useNavigate();
   const [f, setF] = useState({ title: "", place: "", notes: "", date: "", time: "20:00" });
   const [template, setTemplate] = useState("stala");
+  const [signupMode, setSignupMode] = useState<"core" | "open">("core");
+  const [checklist, setChecklist] = useState<{ quantity: number; name: string }[]>([]);
+  const [itemName, setItemName] = useState("");
+  const [itemQty, setItemQty] = useState(1);
   const qc = useQueryClient();
   const announce = useServerFn(announceParty);
   const templates = useQuery({ queryKey: ["party-templates"], queryFn: async () => { const { data, error } = await supabase.from("party_templates").select("*").order("created_at"); if (error) throw error; return data; } });
@@ -51,7 +55,7 @@ function NewParty() {
   async function saveTemplate() {
     if (!userId || !templateName.trim()) return;
     setSavingTemplate(true);
-    const { data, error } = await supabase.from("party_templates").insert({ creator_id: userId, name: templateName.trim(), roles }).select().single();
+    const { data, error } = await supabase.from("party_templates").insert({ creator_id: userId, name: templateName.trim(), roles, signup_mode: signupMode, checklist }).select().single();
     setSavingTemplate(false);
     if (error) { toast.error(error.message); return; }
     await qc.invalidateQueries({ queryKey: ["party-templates"] });
@@ -69,7 +73,7 @@ function NewParty() {
     if (roles.length < 1 || roles.length > MAX_PARTY_SIZE) { toast.error("A party has 1 to 12 slots"); return; }
     setBusy(true);
     const { data, error } = await supabase.from("parties").insert({
-      creator_id: userId, title: p.data.title, place: p.data.place, notes: p.data.notes || null, template,
+      creator_id: userId, title: p.data.title, place: p.data.place, notes: p.data.notes || null, template, signup_mode: signupMode, checklist,
       starts_at: new Date(`${f.date}T${f.time}`).toISOString(),
     }).select("id").single();
     if (error || !data) { setBusy(false); toast.error(error?.message ?? "Could not create party"); return; }
@@ -93,7 +97,7 @@ function NewParty() {
 
       <h2 className="mt-8 text-2xl font-bold">Template</h2>
       <div className="mt-3 flex flex-wrap items-center gap-3">
-        <select aria-label="Party template" className={fieldClass + " min-w-60"} value={template} onChange={(e) => { const t = allTemplates.find((t) => t.id === e.target.value); if (t) { setTemplate(t.id); setRoles([...t.roles]); } }}>
+        <select aria-label="Party template" className={fieldClass + " min-w-60"} value={template} onChange={(e) => { const t = allTemplates.find((t) => t.id === e.target.value); if (t) { setTemplate(t.id); setRoles([...t.roles]); setSignupMode(("signup_mode" in t && t.signup_mode === "open") ? "open" : "core"); setChecklist(("checklist" in t && Array.isArray(t.checklist) ? t.checklist : []) as {quantity:number;name:string}[]); } }}>
           <optgroup label="Guild defaults">{PARTY_TEMPLATES.map((t) => <option value={t.id} key={t.id}>{t.name} ({t.roles.length} slots)</option>)}</optgroup>
           <optgroup label="Member templates">{(templates.data ?? []).map((t) => <option value={t.id} key={t.id}>{t.name} ({t.roles.length} slots)</option>)}</optgroup>
         </select>
@@ -101,6 +105,18 @@ function NewParty() {
       </div>
       {templates.isError && <p className="mt-2 text-sm text-destructive">Could not load member templates.</p>}
 
+      <section className="mt-8 rounded-xl border border-border bg-card p-5">
+        <h2 className="text-xl font-bold">Who can join?</h2>
+        <p className="mt-1 text-sm text-muted-foreground">Choose whether class requirements matter. Everyone can always join the substitute list.</p>
+        <div className="mt-4 grid gap-3 sm:grid-cols-2">
+          {([["core","Core classes have priority","Only matching classes fill reserved slots. Others join the substitute list."],["open","Anyone can join","First come, first served, regardless of required class."]] as const).map(([value,title,description]) => (
+            <button type="button" key={value} onClick={() => setSignupMode(value)} aria-pressed={signupMode === value} className={`rounded-lg border p-4 text-left transition-colors ${signupMode === value ? "border-primary bg-primary/10" : "border-border hover:border-primary/50"}`}>
+              <span className="font-semibold">{title}</span>
+              <span className="mt-1 block text-sm text-muted-foreground">{description}</span>
+            </button>
+          ))}
+        </div>
+      </section>
       <h2 className="mt-8 text-2xl font-bold">Slots <span className="text-base text-muted-foreground">{roles.length}/{MAX_PARTY_SIZE}</span></h2>
       <div className="mt-3 grid gap-2 sm:grid-cols-2">
         {roles.map((r, i) => (
@@ -114,9 +130,19 @@ function NewParty() {
       <Button className="mt-3" variant="outline" disabled={!canAddSlot(roles.length)} onClick={() => setRoles([...roles, "Any"])}>
         {canAddSlot(roles.length) ? "Add slot" : "Party is full (12)"}
       </Button>
+      <section className="mt-8 rounded-xl border border-border bg-card p-5">
+        <h2 className="text-xl font-bold">Preparation checklist <span className="text-sm font-normal text-muted-foreground">(optional)</span></h2>
+        <p className="mt-1 text-sm text-muted-foreground">What should everyone bring? Save the list with a template for future runs.</p>
+        <div className="mt-4 flex flex-wrap gap-2">
+          <Input aria-label="Item quantity" type="number" min={1} max={99999} className="w-24" value={itemQty} onChange={e => setItemQty(Math.max(1,Number(e.target.value)||1))} />
+          <Input aria-label="Item name" className="min-w-40 flex-1" maxLength={80} placeholder="Green Potion" value={itemName} onChange={e => setItemName(e.target.value)} onKeyDown={e => { if(e.key === "Enter") {e.preventDefault(); if(itemName.trim() && checklist.length<30) {setChecklist([...checklist,{quantity:itemQty,name:itemName.trim()}]);setItemName("");setItemQty(1);} } }} />
+          <Button type="button" variant="outline" disabled={!itemName.trim() || checklist.length>=30} onClick={() => {setChecklist([...checklist,{quantity:itemQty,name:itemName.trim()}]);setItemName("");setItemQty(1);}}>Add item</Button>
+        </div>
+        {checklist.length > 0 && <ul className="mt-4 space-y-2">{checklist.map((item,i) => <li key={i} className="flex items-center justify-between gap-2 rounded-md bg-secondary/50 px-3 py-2"><span>{item.quantity}× {item.name}</span><Button type="button" size="sm" variant="ghost" onClick={() => setChecklist(checklist.filter((_,j)=>j!==i))}>Remove</Button></li>)}</ul>}
+      </section>
       <div className="mt-6 flex flex-wrap gap-2">
         <Input aria-label="New template name" placeholder="New template name" maxLength={80} className="max-w-xs" value={templateName} onChange={(e) => setTemplateName(e.target.value)} />
-        <Button variant="outline" disabled={!templateName.trim() || savingTemplate || !userId} onClick={saveTemplate}>Save slots as template</Button>
+        <Button variant="outline" disabled={!templateName.trim() || savingTemplate || !userId} onClick={saveTemplate}>Save setup as template</Button>
       </div>
       <div className="mt-8"><Button size="lg" disabled={busy} onClick={create}>Create party</Button></div>
     </main>
