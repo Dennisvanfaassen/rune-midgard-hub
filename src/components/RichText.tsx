@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import { useEditor, EditorContent, type Editor } from "@tiptap/react";
 import StarterKit from "@tiptap/starter-kit";
 import Image from "@tiptap/extension-image";
@@ -52,11 +52,55 @@ export async function resolveImages(html: string) {
   return doc.body.innerHTML;
 }
 
+type ArticleHeading = { id: string; text: string; level: number };
+
+/** Build navigation from sanitized headings, never from untrusted pasted HTML links. */
+function addHeadingNavigation(html: string, prefix: string): { html: string; headings: ArticleHeading[] } {
+  const doc = new DOMParser().parseFromString(html, "text/html");
+  const headings: ArticleHeading[] = [];
+  const used = new Map<string, number>();
+  doc.body.querySelectorAll("h1, h2, h3").forEach((heading) => {
+    const text = (heading.textContent ?? "").trim().replace(/\\s+/g, " ");
+    if (!text) return;
+    const slug = text.toLowerCase().normalize("NFKD").replace(/[\\u0300-\\u036f]/g, "")
+      .replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 65) || "section";
+    const repeat = used.get(slug) ?? 0;
+    used.set(slug, repeat + 1);
+    const id = prefix + "-" + slug + (repeat ? "-" + (repeat + 1) : "");
+    heading.id = id;
+    headings.push({ id, text, level: Number(heading.tagName.slice(1)) });
+  });
+  return { html: doc.body.innerHTML, headings };
+}
+
 export function RichContent({ html }: { html: string }) {
-  const [out, setOut] = useState<string | null>(null);
-  useEffect(() => { let live = true; resolveImages(html).then((h) => live && setOut(h)); return () => { live = false; }; }, [html]);
-  if (out === null) return <div className="h-6 animate-pulse rounded bg-secondary" />;
-  return <div className="rich-content" dangerouslySetInnerHTML={{ __html: out }} />;
+  const prefix = useId().replace(/[^a-zA-Z0-9_-]/g, "");
+  const [article, setArticle] = useState<{ html: string; headings: ArticleHeading[] } | null>(null);
+  useEffect(() => {
+    let live = true;
+    setArticle(null);
+    resolveImages(html).then((resolved) => {
+      if (live) setArticle(addHeadingNavigation(resolved, prefix));
+    }).catch(() => {
+      if (live) setArticle(addHeadingNavigation(sanitize(html), prefix));
+    });
+    return () => { live = false; };
+  }, [html, prefix]);
+  if (article === null) return <div className="h-6 animate-pulse rounded bg-secondary" />;
+  return <div>
+    {article.headings.length >= 2 && <nav aria-label="Article table of contents" className="forum-toc mb-6 rounded-lg border border-border bg-secondary/40 p-4">
+      <div className="mb-3 text-sm font-bold uppercase tracking-wide text-primary">Jump to section</div>
+      <ul className="grid gap-1 sm:grid-cols-2">
+        {article.headings.map((heading) => <li key={heading.id} className={heading.level === 3 ? "pl-4" : ""}>
+          <a className="forum-toc-link block rounded px-2 py-1.5 text-sm text-foreground hover:bg-secondary hover:text-primary"
+            href={`#${heading.id}`}>{heading.text}</a>
+        </li>)}
+      </ul>
+    </nav>}
+    <div className="rich-content" dangerouslySetInnerHTML={{ __html: article.html }} />
+    {article.headings.length >= 2 && <a className="mt-5 inline-block text-xs text-primary hover:underline"
+      href={`#${article.headings[0].id}`}>↑ Back to first section</a>}
+  </div>;
 }
 
 const COLORS = ["#e5e7eb", "#60a5fa", "#34d399", "#fbbf24", "#f87171", "#c084fc", "#f472b6"];
