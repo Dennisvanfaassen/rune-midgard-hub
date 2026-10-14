@@ -138,22 +138,61 @@ export type Database = {
           },
         ]
       }
-      market_comments: {
-        Row: { id: string; listing_id: string; author_id: string; body: string; created_at: string }
-        Insert: { id?: string; listing_id: string; author_id: string; body: string; created_at?: string }
-        Update: { id?: string; listing_id?: string; author_id?: string; body?: string; created_at?: string }
-        Relationships: [
-          { foreignKeyName: "market_comments_listing_id_fkey"; columns: ["listing_id"]; isOneToOne: false; referencedRelation: "market_listings"; referencedColumns: ["id"] },
-          { foreignKeyName: "market_comments_author_id_fkey"; columns: ["author_id"]; isOneToOne: false; referencedRelation: "profiles"; referencedColumns: ["id"] }
-        ]
+      guild_member_roles: {
+        Row: {
+          role: string
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          role?: string
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          role?: string
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
       }
-      market_offers: {
-        Row: { id: string; listing_id: string; buyer_id: string; amount: number; message: string | null; status: string; created_at: string; responded_at: string | null }
-        Insert: { id?: string; listing_id: string; buyer_id: string; amount: number; message?: string | null; status?: string; created_at?: string; responded_at?: string | null }
-        Update: { id?: string; listing_id?: string; buyer_id?: string; amount?: number; message?: string | null; status?: string; created_at?: string; responded_at?: string | null }
+      market_comments: {
+        Row: {
+          author_id: string
+          body: string
+          created_at: string
+          id: string
+          listing_id: string
+        }
+        Insert: {
+          author_id: string
+          body: string
+          created_at?: string
+          id?: string
+          listing_id: string
+        }
+        Update: {
+          author_id?: string
+          body?: string
+          created_at?: string
+          id?: string
+          listing_id?: string
+        }
         Relationships: [
-          { foreignKeyName: "market_offers_listing_id_fkey"; columns: ["listing_id"]; isOneToOne: false; referencedRelation: "market_listings"; referencedColumns: ["id"] },
-          { foreignKeyName: "market_offers_buyer_id_fkey"; columns: ["buyer_id"]; isOneToOne: false; referencedRelation: "profiles"; referencedColumns: ["id"] }
+          {
+            foreignKeyName: "market_comments_author_id_fkey"
+            columns: ["author_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "market_comments_listing_id_fkey"
+            columns: ["listing_id"]
+            isOneToOne: false
+            referencedRelation: "market_listings"
+            referencedColumns: ["id"]
+          },
         ]
       }
       market_listings: {
@@ -200,39 +239,87 @@ export type Database = {
           },
         ]
       }
+      market_offers: {
+        Row: {
+          amount: number
+          buyer_id: string
+          created_at: string
+          id: string
+          listing_id: string
+          message: string | null
+          responded_at: string | null
+          status: string
+        }
+        Insert: {
+          amount: number
+          buyer_id: string
+          created_at?: string
+          id?: string
+          listing_id: string
+          message?: string | null
+          responded_at?: string | null
+          status?: string
+        }
+        Update: {
+          amount?: number
+          buyer_id?: string
+          created_at?: string
+          id?: string
+          listing_id?: string
+          message?: string | null
+          responded_at?: string | null
+          status?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "market_offers_buyer_id_fkey"
+            columns: ["buyer_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "market_offers_listing_id_fkey"
+            columns: ["listing_id"]
+            isOneToOne: false
+            referencedRelation: "market_listings"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       parties: {
         Row: {
-          signup_mode: string
           checklist: Json
           created_at: string
           creator_id: string
           id: string
           notes: string | null
           place: string
+          signup_mode: string
           starts_at: string
           template: string | null
           title: string
         }
         Insert: {
-          signup_mode?: string
           checklist?: Json
           created_at?: string
           creator_id: string
           id?: string
           notes?: string | null
           place: string
+          signup_mode?: string
           starts_at: string
           template?: string | null
           title: string
         }
         Update: {
-          signup_mode?: string
           checklist?: Json
           created_at?: string
           creator_id?: string
           id?: string
           notes?: string | null
           place?: string
+          signup_mode?: string
           starts_at?: string
           template?: string | null
           title?: string
@@ -247,22 +334,43 @@ export type Database = {
           },
         ]
       }
-      party_waitlist: {
-        Row: { id: string; party_id: string; user_id: string; job: string; char_name: string | null; created_at: string }
-        Insert: { id?: string; party_id: string; user_id: string; job: string; char_name?: string | null; created_at?: string }
-        Update: { id?: string; party_id?: string; user_id?: string; job?: string; char_name?: string | null; created_at?: string }
-        Relationships: [
-          { foreignKeyName: "party_waitlist_party_id_fkey"; columns: ["party_id"]; isOneToOne: false; referencedRelation: "parties"; referencedColumns: ["id"] },
-          { foreignKeyName: "party_waitlist_user_id_fkey"; columns: ["user_id"]; isOneToOne: false; referencedRelation: "profiles"; referencedColumns: ["id"] }
-        ]
-      }
       party_readiness: {
-        Row: { party_id: string; user_id: string; ready: boolean; supplies_ready: boolean; updated_at: string }
-        Insert: { party_id: string; user_id: string; ready?: boolean; supplies_ready?: boolean; updated_at?: string }
-        Update: { party_id?: string; user_id?: string; ready?: boolean; supplies_ready?: boolean; updated_at?: string }
+        Row: {
+          party_id: string
+          ready: boolean
+          supplies_ready: boolean
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          party_id: string
+          ready?: boolean
+          supplies_ready?: boolean
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          party_id?: string
+          ready?: boolean
+          supplies_ready?: boolean
+          updated_at?: string
+          user_id?: string
+        }
         Relationships: [
-          { foreignKeyName: "party_readiness_party_id_fkey"; columns: ["party_id"]; isOneToOne: false; referencedRelation: "parties"; referencedColumns: ["id"] },
-          { foreignKeyName: "party_readiness_user_id_fkey"; columns: ["user_id"]; isOneToOne: false; referencedRelation: "profiles"; referencedColumns: ["id"] }
+          {
+            foreignKeyName: "party_readiness_party_id_fkey"
+            columns: ["party_id"]
+            isOneToOne: false
+            referencedRelation: "parties"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "party_readiness_user_id_fkey"
+            columns: ["user_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
         ]
       }
       party_slots: {
@@ -312,7 +420,6 @@ export type Database = {
       }
       party_templates: {
         Row: {
-          signup_mode: string
           checklist: Json
           created_at: string
           creator_id: string
@@ -320,9 +427,9 @@ export type Database = {
           id: string
           name: string
           roles: string[]
+          signup_mode: string
         }
         Insert: {
-          signup_mode?: string
           checklist?: Json
           created_at?: string
           creator_id: string
@@ -330,9 +437,9 @@ export type Database = {
           id?: string
           name: string
           roles: string[]
+          signup_mode?: string
         }
         Update: {
-          signup_mode?: string
           checklist?: Json
           created_at?: string
           creator_id?: string
@@ -340,6 +447,7 @@ export type Database = {
           id?: string
           name?: string
           roles?: string[]
+          signup_mode?: string
         }
         Relationships: [
           {
@@ -351,11 +459,47 @@ export type Database = {
           },
         ]
       }
-      guild_member_roles: {
-        Row: { user_id: string; role: string; updated_at: string }
-        Insert: { user_id: string; role?: string; updated_at?: string }
-        Update: { user_id?: string; role?: string; updated_at?: string }
-        Relationships: []
+      party_waitlist: {
+        Row: {
+          char_name: string | null
+          created_at: string
+          id: string
+          job: string
+          party_id: string
+          user_id: string
+        }
+        Insert: {
+          char_name?: string | null
+          created_at?: string
+          id?: string
+          job: string
+          party_id: string
+          user_id: string
+        }
+        Update: {
+          char_name?: string | null
+          created_at?: string
+          id?: string
+          job?: string
+          party_id?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "party_waitlist_party_id_fkey"
+            columns: ["party_id"]
+            isOneToOne: false
+            referencedRelation: "parties"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "party_waitlist_user_id_fkey"
+            columns: ["user_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       profiles: {
         Row: {
@@ -449,16 +593,40 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
-      guild_my_role: { Args: Record<string, never>; Returns: string }
-      guild_set_role: { Args: { target_user: string; new_role: string }; Returns: undefined }
       guild_delete_member: { Args: { target_user: string }; Returns: undefined }
-      market_respond_offer: { Args: { p_offer: string; p_action: string }; Returns: undefined }
-      market_withdraw_offer: { Args: { p_offer: string }; Returns: undefined }
+      guild_my_role: { Args: never; Returns: string }
+      guild_set_role: {
+        Args: { new_role: string; target_user: string }
+        Returns: undefined
+      }
       is_party_creator: { Args: { _party: string }; Returns: boolean }
-      party_job_matches: { Args: { p_role: string; p_job: string }; Returns: boolean }
+      market_respond_offer: {
+        Args: { p_action: string; p_offer: string }
+        Returns: undefined
+      }
+      market_withdraw_offer: { Args: { p_offer: string }; Returns: undefined }
+      party_job_matches: {
+        Args: { p_job: string; p_role: string }
+        Returns: boolean
+      }
+      party_leave: {
+        Args: { _member?: string; _party: string }
+        Returns: undefined
+      }
       party_promote: { Args: { _party: string }; Returns: undefined }
-      party_signup: { Args: { _party: string; _job: string; _char_name?: string | null }; Returns: string }
-      party_leave: { Args: { _party: string; _member?: string | null }; Returns: undefined }
+      party_signup: {
+        Args: { _char_name?: string; _job: string; _party: string }
+        Returns: string
+      }
+      party_signup_role: {
+        Args: {
+          _char_name?: string
+          _party: string
+          _slot?: string
+          _waitlist_role?: string
+        }
+        Returns: string
+      }
     }
     Enums: {
       [_ in never]: never
