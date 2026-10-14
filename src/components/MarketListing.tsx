@@ -1,3 +1,5 @@
+import { useState } from "react";
+import { MarketListingDetails } from "@/components/MarketListingDetails";
 import { Link } from "@tanstack/react-router";
 import { useQuery } from "@tanstack/react-query";
 import { toast } from "sonner";
@@ -22,6 +24,7 @@ export function useListings(limit?: number) {
 type Listing = NonNullable<ReturnType<typeof useListings>["data"]>[number];
 
 export function ListingCard({ l, mine, onChange }: { l: Listing; mine?: boolean; onChange?: () => void }) {
+  const [expanded, setExpanded] = useState(false);
   const p = l.profiles;
   async function setStatus(status: string) { const { error } = await supabase.from("market_listings").update({ status }).eq("id", l.id); if (error) toast.error(error.message); else onChange?.(); }
   async function remove() { if (!confirm("Remove this listing?")) return; const { error } = await supabase.from("market_listings").delete().eq("id", l.id); if (error) toast.error(error.message); else onChange?.(); }
@@ -36,6 +39,8 @@ export function ListingCard({ l, mine, onChange }: { l: Listing; mine?: boolean;
     {p && <Link to="/members/$id" params={{ id: p.id }} className="mt-auto flex items-center gap-2 pt-3 text-sm">
       <CharacterPortrait path={p.avatar_path} name={p.char_name || p.display_name} className="h-8 w-7" /><span>Sold by <span className="font-semibold text-primary">{p.char_name || p.display_name}</span></span>
     </Link>}
+    <Button size="sm" variant="outline" className="mt-3 w-full" onClick={() => setExpanded((v) => !v)}>{expanded ? "Hide comments & offers" : "View comments & make an offer"}</Button>
+    {expanded && <MarketListingDetails listingId={l.id} sellerId={l.seller_id} status={l.status} />}
     {mine && <div className="mt-3 flex flex-wrap gap-1">
       {(["open", "reserved", "sold"] as const).map((s) => <Button key={s} size="sm" variant={l.status === s ? "default" : "outline"} className="h-7 text-xs capitalize" onClick={() => setStatus(s)}>{s}</Button>)}
       <Button size="sm" variant="ghost" className="h-7 text-xs text-destructive" onClick={remove}>Remove</Button>
