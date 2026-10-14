@@ -15,6 +15,7 @@ import { reportLovableError } from "../lib/lovable-error-reporting";
 import { supabase } from "@/integrations/supabase/client";
 import { AuthProvider } from "@/lib/auth";
 import { SiteHeader } from "@/components/SiteHeader";
+import { WebsiteThemeManager } from "@/components/WebsiteTheme";
 import { Toaster } from "@/components/ui/sonner";
 
 function NotFoundComponent() {
@@ -130,6 +131,7 @@ function RootComponent() {
   return (
     <QueryClientProvider client={queryClient}>
       <AuthProvider>
+        <WebsiteThemeManager />
         <div className="min-h-screen">
           <SiteHeader />
           <Outlet />
