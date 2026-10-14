@@ -1,3 +1,4 @@
+import { GuildBadge, useGuildBadges } from "@/components/GuildBadge";
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useQuery } from "@tanstack/react-query";
 import { useState } from "react";
@@ -22,6 +23,7 @@ export const Route = createFileRoute("/members/")({
 });
 
 function Members() {
+  const badges = useGuildBadges();
   const [q, setQ] = useState("");
   const [job, setJob] = useState("Any");
   const { data = [], isLoading } = useQuery({
@@ -45,7 +47,7 @@ function Members() {
             <Link key={m.id} to="/members/$id" params={{ id: m.id }} className="flex items-center gap-4 rounded-lg border border-border bg-card p-4 transition hover:border-primary">
               <CharacterPortrait path={m.avatar_path} name={m.char_name || m.display_name} />
               <div className="min-w-0">
-              <div className="font-display text-lg font-bold">{m.char_name || m.display_name}</div>
+              <div className="font-display text-lg font-bold">{m.char_name || m.display_name} <GuildBadge role={badges.data?.[m.id]} /></div>
               {m.char_name && <div className="text-xs text-muted-foreground">{m.display_name}</div>}
               <div className="mt-2 text-sm text-primary">{jobName(m.job)} · Base {m.base_lv} / Job {m.job_lv}</div>
               <div className="mt-1 text-xs text-muted-foreground">{need} item{need === 1 ? "" : "s"} still needed</div>
