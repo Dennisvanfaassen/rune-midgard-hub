@@ -1,3 +1,4 @@
+import { GuildBadge, useGuildBadges } from "@/components/GuildBadge";
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
@@ -26,6 +27,7 @@ export const Route = createFileRoute("/parties/$id")({
 function PartyPage() {
   const { id } = Route.useParams();
   const { userId } = useAuth();
+  const badges = useGuildBadges();
   const qc = useQueryClient();
   const navigate = useNavigate();
   const announce = useServerFn(announceParty);
@@ -125,7 +127,7 @@ function PartyPage() {
     <main className="mx-auto max-w-4xl px-4 py-10">
       <Link to="/parties" className="text-sm text-primary">← All parties</Link>
       <h1 className="mt-2 text-4xl font-bold">{party.title}</h1>
-      <p className="mt-2 text-muted-foreground">{formatPartyTime(party.starts_at)} · {party.place} · organised by {party.profiles?.display_name}</p>
+      <p className="mt-2 text-muted-foreground">{formatPartyTime(party.starts_at)} · {party.place} · organised by {party.profiles?.display_name} <GuildBadge role={badges.data?.[party.creator_id]} /></p>
       <p className="mt-2 font-semibold text-primary">{partyCountdown(party.starts_at)}</p>
       <p className="mt-3 text-sm text-muted-foreground">{party.signup_mode === "open" ? "Anyone can join · First come, first served" : "Choose any open role, regardless of profile class · Substitute list available"}</p>
       {Array.isArray(party.checklist) && party.checklist.length > 0 && <section className="mt-5 rounded-xl border border-border bg-card p-5">
@@ -166,7 +168,7 @@ function PartyPage() {
               <div className="text-xs uppercase tracking-wide text-muted-foreground">{s.role === "Any" ? "Any class" : jobName(s.role)}</div>
               {s.user_id ? (
                 <Link to="/members/$id" params={{ id: s.user_id }} className="font-semibold hover:text-primary">
-                  {s.char_name || s.profiles?.display_name} {readiness.data?.find((r) => r.user_id === s.user_id)?.ready && <span title="Member ready" className="text-xs text-emerald-500">✓ Ready</span>} {readiness.data?.find((r) => r.user_id === s.user_id)?.supplies_ready && <span title="Supplies ready" className="text-xs text-emerald-500">✓ Supplies</span>} <span className="text-sm text-primary">{s.job && jobName(s.job)}</span>
+                  {s.char_name || s.profiles?.display_name} <GuildBadge role={badges.data?.[s.user_id ?? ""]} /> {readiness.data?.find((r) => r.user_id === s.user_id)?.ready && <span title="Member ready" className="text-xs text-emerald-500">✓ Ready</span>} {readiness.data?.find((r) => r.user_id === s.user_id)?.supplies_ready && <span title="Supplies ready" className="text-xs text-emerald-500">✓ Supplies</span>} <span className="text-sm text-primary">{s.job && jobName(s.job)}</span>
                 </Link>
               ) : <div className="text-sm text-muted-foreground">Open slot</div>}
             </div>
@@ -182,7 +184,7 @@ function PartyPage() {
         <p className="mt-1 text-sm text-muted-foreground">Substitutes who selected a matching role get priority; otherwise the earliest available substitute is promoted. No profile-class restrictions.</p>
         {(waitlist.data ?? []).length === 0 ? <p className="mt-4 text-sm text-muted-foreground">No substitutes yet.</p> :
           <ol className="mt-4 space-y-2">{(waitlist.data ?? []).map((w,i)=><li key={w.id} className="flex items-center gap-3 rounded-lg bg-secondary/40 px-3 py-2 text-sm">
-            <span className="text-muted-foreground">{i+1}.</span><span className="flex-1 font-medium">{w.char_name || w.profiles?.display_name} <span className="font-normal text-muted-foreground">· Preferred: {jobName(w.job)}</span></span>
+            <span className="text-muted-foreground">{i+1}.</span><span className="flex-1 font-medium">{w.char_name || w.profiles?.display_name} <GuildBadge role={badges.data?.[w.user_id]} /> <span className="font-normal text-muted-foreground">· Preferred: {jobName(w.job)}</span></span>
             {(isCreator || w.user_id===userId) && <Button size="sm" variant="ghost" onClick={()=>leave(w.user_id)}>Remove</Button>}
           </li>)}</ol>}
       </section>
