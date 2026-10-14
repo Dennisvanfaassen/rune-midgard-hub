@@ -196,6 +196,8 @@ export type Database = {
           title: string
         }
         Insert: {
+          signup_mode?: string
+          checklist?: Json
           created_at?: string
           creator_id: string
           id?: string
@@ -206,6 +208,8 @@ export type Database = {
           title: string
         }
         Update: {
+          signup_mode?: string
+          checklist?: Json
           created_at?: string
           creator_id?: string
           id?: string
@@ -291,6 +295,8 @@ export type Database = {
           roles: string[]
         }
         Insert: {
+          signup_mode?: string
+          checklist?: Json
           created_at?: string
           creator_id: string
           description?: string
@@ -299,6 +305,8 @@ export type Database = {
           roles: string[]
         }
         Update: {
+          signup_mode?: string
+          checklist?: Json
           created_at?: string
           creator_id?: string
           description?: string
