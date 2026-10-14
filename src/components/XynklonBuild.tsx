@@ -149,7 +149,7 @@ export function XynklonBuild({ ownerId, isOwner, saved, onSaved, job, wishlist, 
       {!stats && equipment.length === 0 && <p className="text-xs text-muted-foreground">This link has no readable stat or equipment values. Open it in Xynklon to view the build.</p>}
       <p className="text-xs text-muted-foreground">Skill allocations are not present in this export and cannot be displayed automatically.</p>
     </div>}
-    {!build && <p className="mt-3 text-sm text-muted-foreground">{saved ? "This previously saved link is invalid." : "No Xynklon build linked yet."} {isOwner && "Make a build in Xynklon, copy its share URL and add it here."}</pv>}
+    {!build && <p className="mt-3 text-sm text-muted-foreground">{saved ? "This previously saved link is invalid." : "No Xynklon build linked yet."} {isOwner && "Make a build in Xynklon, copy its share URL and add it here."}</p>}
     <p className="mt-4 text-xs text-muted-foreground">External calculator: <a className="text-primary underline" href={BUILDER} target="_blank" rel="noopener noreferrer">SoulBound Xynklon ↗</a></p>
   </section>;
 }
