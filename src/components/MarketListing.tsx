@@ -1,3 +1,4 @@
+import { GuildBadge, useGuildBadges } from "@/components/GuildBadge";
 import { useState } from "react";
 import { MarketListingDetails } from "@/components/MarketListingDetails";
 import { Link } from "@tanstack/react-router";
@@ -26,6 +27,7 @@ type Listing = NonNullable<ReturnType<typeof useListings>["data"]>[number];
 export function ListingCard({ l, mine, onChange }: { l: Listing; mine?: boolean; onChange?: () => void }) {
   const [expanded, setExpanded] = useState(false);
   const p = l.profiles;
+  const badges = useGuildBadges();
   async function setStatus(status: string) { const { error } = await supabase.from("market_listings").update({ status }).eq("id", l.id); if (error) toast.error(error.message); else onChange?.(); }
   async function remove() { if (!confirm("Remove this listing?")) return; const { error } = await supabase.from("market_listings").delete().eq("id", l.id); if (error) toast.error(error.message); else onChange?.(); }
   return <article className={"flex flex-col rounded-lg border bg-card p-4 " + (l.status === "open" ? "border-border" : "border-border opacity-60")}>
@@ -37,7 +39,7 @@ export function ListingCard({ l, mine, onChange }: { l: Listing; mine?: boolean;
     {l.quantity > 1 && <p className="text-xs text-muted-foreground">{formatZeny(l.price / l.quantity)} each</p>}
     {l.note && <p className="mt-2 whitespace-pre-line text-sm text-muted-foreground">{l.note}</p>}
     {p && <Link to="/members/$id" params={{ id: p.id }} className="mt-auto flex items-center gap-2 pt-3 text-sm">
-      <CharacterPortrait path={p.avatar_path} name={p.char_name || p.display_name} className="h-8 w-7" /><span>Sold by <span className="font-semibold text-primary">{p.char_name || p.display_name}</span></span>
+      <CharacterPortrait path={p.avatar_path} name={p.char_name || p.display_name} className="h-8 w-7" /><span>Sold by <span className="font-semibold text-primary">{p.char_name || p.display_name}</span> <GuildBadge role={badges.data?.[p.id]} /></span>
     </Link>}
     <Button size="sm" variant="outline" className="mt-3 w-full" onClick={() => setExpanded((v) => !v)}>{expanded ? "Hide comments & offers" : "View comments & make an offer"}</Button>
     {expanded && <MarketListingDetails listingId={l.id} sellerId={l.seller_id} status={l.status} />}
