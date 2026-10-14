@@ -39,12 +39,33 @@ export function sanitize(html: string) {
 }
 
 /** Import a complete HTML document as editable TipTap content, not executable page code. */
-function prepareImportedHtml(source: string): string {
+async function prepareImportedHtml(source: string, userId: string | null): Promise<string> {
   const doc = new DOMParser().parseFromString(source, "text/html");
   // Full HTML files often wrap the article in main/article elements.
   const root = doc.querySelector("article") ?? doc.querySelector("main") ?? doc.body;
   // Removing unsafe/external elements *before* flattening prevents CSS/JS text from appearing.
   root.querySelectorAll("script, style, link, meta, iframe, object, embed, form, input, button, svg, canvas, noscript").forEach((node) => node.remove());
+  // Upload embedded guide images to private forum storage before sanitization.
+  for (const img of root.querySelectorAll<HTMLImageElement>("img")) {
+    const src = img.getAttribute("src") ?? "";
+    if (!src.startsWith("data:image/")) continue;
+    try {
+      if (!userId) throw new Error("Sign in to upload images");
+      const response = await fetch(src);
+      const blob = await response.blob();
+      if (!["image/png", "image/jpeg", "image/webp", "image/gif"].includes(blob.type) || blob.size > 5 * 1024 * 1024) throw new Error("Unsupported embedded image");
+      const path = userId + "/" + crypto.randomUUID() + "." + (blob.type === "image/jpeg" ? "jpg" : blob.type.split("/")[1]);
+      const uploaded = await supabase.storage.from(BUCKET).upload(path, blob, { contentType: blob.type });
+      if (uploaded.error) throw uploaded.error;
+      const signed = await supabase.storage.from(BUCKET).createSignedUrl(path, 60 * 60 * 6);
+      if (!signed.data?.signedUrl) throw new Error("Could not access uploaded image");
+      img.setAttribute("src", signed.data.signedUrl);
+      img.setAttribute("data-path", path);
+    } catch {
+      img.remove();
+      toast.warning("An embedded image could not be uploaded; check forum image storage permissions.");
+    }
+  }
   const clean = DOMPurify.sanitize(root.innerHTML, {
     ALLOWED_TAGS: ["p", "br", "h1", "h2", "h3", "strong", "b", "em", "i", "u", "s", "a", "ul", "ol", "li", "blockquote", "pre", "code", "hr", "img", "span", "mark", "div"],
     ALLOWED_ATTR: ["href", "src", "alt", "title", "style", "data-path"],
@@ -209,9 +230,9 @@ export function RichEditor({ initial = "", onChange, placeholder = "Write someth
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [editor]);
 
-  function importHtml() {
+  async function importHtml() {
     if (!editor || !importSource.trim()) return;
-    const cleaned = prepareImportedHtml(importSource);
+    const cleaned = await prepareImportedHtml(importSource, userId);
     if (!cleaned || !/<(?:p|h[123]|ul|ol|img|blockquote|div|pre)\b/i.test(cleaned)) {
       toast.error("No supported article content found in this HTML.");
       return;
