@@ -3,6 +3,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/lib/auth";
 import { Button } from "@/components/ui/button";
+import { useQuery } from "@tanstack/react-query";
 import crest from "@/assets/guild-blue-bird.png.asset.json";
 
 const NAV = [
@@ -17,6 +18,7 @@ export function SiteHeader() {
   const { userId, ready } = useAuth();
   const qc = useQueryClient();
   const navigate = useNavigate();
+  const guildRole = useQuery({ queryKey: ["guild-my-role", userId], enabled: !!userId, queryFn: async () => { const { data, error } = await supabase.rpc("guild_my_role"); if (error) return "Guildmember"; return data; } });
   async function signOut() {
     await qc.cancelQueries();
     qc.clear();
@@ -41,6 +43,7 @@ export function SiteHeader() {
         <div className="ml-auto flex items-center gap-2">
           {ready && userId ? (
             <>
+              {guildRole.data === "Admin" && <Button asChild variant="outline" size="sm"><Link to="/admin">Admin</Link></Button>}
               <Button asChild variant="outline" size="sm"><Link to="/members/$id" params={{ id: userId }}>My profile</Link></Button>
               <Button variant="ghost" size="sm" onClick={signOut}>Sign out</Button>
             </>
