@@ -32,9 +32,13 @@ function PartyPage() {
   const announce = useServerFn(announceParty);
   const [posting, setPosting] = useState(false);
   const key = ["party", id];
-  const { data: party, isLoading } = useQuery({
+  const { data: party, isLoading, isError: partyError, error: partyLoadError } = useQuery({
     queryKey: key, refetchInterval: 30_000,
-    queryFn: async () => (await supabase.from("parties").select("*,profiles(display_name),party_slots(*,profiles(display_name,char_name))").eq("id", id).gt("starts_at", partyCutoff()).maybeSingle()).data,
+    queryFn: async () => {
+      const { data, error } = await supabase.from("parties").select("*,profiles(display_name),party_slots(*,profiles(display_name,char_name))").eq("id", id).gt("starts_at", partyCutoff()).maybeSingle();
+      if (error) throw error;
+      return data;
+    },
   });
   const me = useQuery({
     queryKey: ["profile", userId],
@@ -70,6 +74,7 @@ function PartyPage() {
   useEffect(() => { if (me.data?.job) setJob(me.data.job); }, [me.data?.job]);
 
   if (isLoading) return <main className="mx-auto max-w-4xl px-4 py-10 text-muted-foreground">Loading…</main>;
+  if (partyError) return <main className="mx-auto max-w-4xl px-4 py-10 text-destructive">Could not load party: {partyLoadError instanceof Error ? partyLoadError.message : "Database query failed"}</main>;
   if (!party) return <main className="mx-auto max-w-4xl px-4 py-10">Party not found. <Link to="/parties" className="text-primary">Back</Link></main>;
 
   const slots = [...party.party_slots].sort((a, b) => a.position - b.position);
