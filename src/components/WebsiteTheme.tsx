@@ -17,7 +17,7 @@ export function isThemeName(value: unknown): value is ThemeName {
 }
 function applyTheme(id: ThemeName) {
   const root = document.documentElement;
-  root.dataset.theme = id;
+  root.dataset["theme"] = id;
   root.classList.toggle("dark", id.startsWith("dark-"));
   root.style.colorScheme = id.startsWith("dark-") ? "dark" : "light";
 }

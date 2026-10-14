@@ -104,8 +104,9 @@ function PartyPage() {
     if (!userId || joining) return;
     setJoining(true);
     const { data, error } = await supabase.rpc("party_signup_role", {
-      _party: id, _slot: slotId ?? undefined, _waitlist_role: desiredRole,
-      _char_name: me.data?.char_name || me.data?.display_name || ""
+      _party: id, _waitlist_role: desiredRole,
+      _char_name: me.data?.char_name || me.data?.display_name || "",
+      ...(slotId !== null ? { _slot: slotId } : {})
     });
     setJoining(false);
     if (error) toast.error(error.message);
@@ -113,7 +114,7 @@ function PartyPage() {
     await Promise.all([refresh(), qc.invalidateQueries({ queryKey: ["party-waitlist", id] })]);
   }
   async function leave(memberId?: string) {
-    const {error}=await supabase.rpc("party_leave",{_party:id,_member:memberId || undefined});
+    const {error}=await supabase.rpc("party_leave",{_party:id, ...(memberId ? { _member: memberId } : {})});
     if(error) toast.error(error.message); else toast.success(memberId && memberId!==userId ? "Member removed" : "You left the party");
     await Promise.all([refresh(),qc.invalidateQueries({queryKey:["party-waitlist",id]})]);
   }

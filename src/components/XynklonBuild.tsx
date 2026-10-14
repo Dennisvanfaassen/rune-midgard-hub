@@ -14,9 +14,9 @@ export function validateXynklonUrl(raw: string): { url: string; payload: Record<
     const parsed = new URL(raw.trim());
     if (parsed.protocol !== "https:" || parsed.hostname !== "soulbound.xynklon.workers.dev" || parsed.username || parsed.password || parsed.port || parsed.pathname !== "/") return null;
     const match = /^#calc=([A-Za-z0-9_-]+)$/.exec(parsed.hash);
-    const code = match?.[1];
-    if (!match || !code || code.length > 12000) return null;
-    const code = match[1].replace(/-/g, "+").replace(/_/g, "/");
+    const raw = match?.[1];
+    if (!match || !raw || raw.length > 12000) return null;
+    const code = raw.replace(/-/g, "+").replace(/_/g, "/");
     const decoded = atob(code.padEnd(Math.ceil(code.length / 4) * 4, "="));
     const bytes = Uint8Array.from(decoded, (ch) => ch.charCodeAt(0));
     const data: unknown = JSON.parse(new TextDecoder().decode(bytes));
