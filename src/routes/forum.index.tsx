@@ -1,3 +1,4 @@
+import { GuildBadge, useGuildBadges } from "@/components/GuildBadge";
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useQuery } from "@tanstack/react-query";
 import { useState } from "react";
@@ -27,6 +28,7 @@ function Forum() {
   const { userId } = useAuth();
   const navigate = useNavigate();
   const [cat, setCat] = useState("all");
+  const badges = useGuildBadges();
   const [q, setQ] = useState("");
   const [open, setOpen] = useState(false);
   const [f, setF] = useState({ title: "", body: "", category: "guides" });
@@ -73,7 +75,7 @@ function Forum() {
       {list.map((t) => <Link key={t.id} to="/forum/$id" params={{ id: t.id }} className="flex flex-wrap items-center gap-3 p-4 hover:bg-secondary">
         {t.pinned && <Pin className="h-4 w-4 text-primary" />}
         <div className="min-w-0 flex-1"><div className="font-semibold">{t.title}</div>
-          <div className="text-xs text-muted-foreground">{categoryName(t.category)} · by {t.profiles?.char_name || t.profiles?.display_name} · {new Date(t.created_at).toLocaleDateString()}</div></div>
+          <div className="text-xs text-muted-foreground">{categoryName(t.category)} · by {t.profiles?.char_name || t.profiles?.display_name} <GuildBadge role={badges.data?.[t.author_id]} /> · {new Date(t.created_at).toLocaleDateString()}</div></div>
         <div className="flex items-center gap-1 text-sm text-muted-foreground"><MessageSquare className="h-4 w-4" />{t.forum_posts[0]?.count ?? 0}</div>
         <div className="w-32 text-right text-xs text-muted-foreground">Last activity<br />{new Date(t.last_post_at).toLocaleString(undefined, { dateStyle: "short", timeStyle: "short" })}</div>
       </Link>)}
