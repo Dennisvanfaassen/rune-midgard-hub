@@ -153,14 +153,34 @@ function EditProfile({ p, onSaved }: { p: { id: string; display_name: string; ch
 
 function AddGear({ engine, userId, onAdded }: { engine: Engine; userId: string; onAdded: () => void }) {
   const [q, setQ] = useState("");
-  const results = useMemo(() => q.length < 2 ? [] : engine.items.filter((i) => i.name.toLowerCase().includes(q.toLowerCase())).slice(0, 12), [q, engine]);
+  const results = useMemo(() => {
+    const needle = q.trim().toLowerCase();
+    if (needle.length < 2) return [];
+    const normalized = (value: string) => value.trim().toLowerCase();
+    const score = (item: (typeof engine.items)[number]) => {
+      const name = normalized(item.name);
+      const display = normalized(itemLabel(item));
+      // Exact display names win (Ring [1]), followed by exact base names
+      // (Ring and Ring [1]), then prefix and substring matches.
+      if (display === needle) return 0;
+      if (name === needle) return 1;
+      if (display.startsWith(needle)) return 2;
+      if (name.startsWith(needle)) return 3;
+      return 4;
+    };
+    return engine.items.filter((i) =>
+      normalized(i.name).includes(needle) || normalized(itemLabel(i)).includes(needle)
+    ).sort((a, b) => score(a) - score(b) ||
+      (a.name === b.name ? (b.slots ?? 0) - (a.slots ?? 0) : a.name.localeCompare(b.name))
+    ).slice(0, 20);
+  }, [q, engine]);
   async function add(key: string, name: string, type: string, status: "have" | "need") {
     const { error } = await supabase.from("gear_wishlist").upsert({ user_id: userId, item_key: key, item_name: name, item_type: type, status }, { onConflict: "user_id,item_key" });
     if (error) toast.error(error.message); else { setQ(""); onAdded(); }
   }
   return (
     <div className="mt-4">
-      <Input placeholder="Search gear or cards to add (e.g. Marc Card)" value={q} onChange={(e) => setQ(e.target.value)} />
+      <Input placeholder="Search gear or cards (e.g. Ring [1], Marc Card)" value={q} onChange={(e) => setQ(e.target.value)} />
       {results.length > 0 && (
         <div className="mt-1 divide-y divide-border rounded-md border border-border">
           {results.map((i) => (
