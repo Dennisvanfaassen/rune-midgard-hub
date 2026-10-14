@@ -103,8 +103,6 @@ function NewParty() {
   const announce = useServerFn(announceParty);
   const templates = useQuery({ queryKey: ["party-templates"], queryFn: async () => { const { data, error } = await supabase.from("party_templates").select("*").order("created_at"); if (error) throw error; return data; } });
   const allTemplates = [...PARTY_TEMPLATES, ...(templates.data ?? [])];
-  const filteredTemplates = allTemplates.filter((t) => !archiveIds.includes(t.id) && ((t.name + " " + (t.description || "")).toLowerCase().includes(templateFilter.toLowerCase()) || templateCategory(t).toLowerCase().includes(templateFilter.toLowerCase())));
-  const [templateName, setTemplateName] = useState("");
   const [archiveIds, setArchiveIds] = useState<string[]>([]);
   useEffect(() => { try { setArchiveIds(JSON.parse(localStorage.getItem("party-archived-templates") || "[]")); } catch {} }, []);
   function toggleArchive(id: string) {
@@ -112,6 +110,8 @@ function NewParty() {
     setArchiveIds(next);
     localStorage.setItem("party-archived-templates", JSON.stringify(next));
   }
+  const filteredTemplates = allTemplates.filter((t) => !archiveIds.includes(t.id) && ((t.name + " " + (t.description || "")).toLowerCase().includes(templateFilter.toLowerCase()) || templateCategory(t).toLowerCase().includes(templateFilter.toLowerCase())));
+  const [templateName, setTemplateName] = useState("");
   async function updateTemplate() {
     if (!userId || !templateName.trim()) { toast.error("Enter a template name"); return; }
     const own = (templates.data ?? []).find((t) => t.id === template && t.creator_id === userId);
