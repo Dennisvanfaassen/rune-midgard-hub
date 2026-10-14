@@ -52,7 +52,7 @@ function Market() {
     {open && userId && <NewListing userId={userId} onDone={() => { setOpen(false); refresh(); }} />}
     <div className="mt-6 flex flex-wrap gap-3">
       <Input aria-label="Search items" className="max-w-sm" placeholder="Search items" value={q} onChange={(e) => setQ(e.target.value)} />
-      <div className="flex gap-1">{[["open", "For sale"], ["free", "Free items"], ["all", "All"]], ...(userId ? [["mine", "My listings"]] : [])].map(([k, label]) => <Button key={k} size="sm" variant={show === k ? "default" : "outline"} onClick={() => setShow(k ?? "open")}>{label}</Button>)}</div>
+      <div className="flex gap-1">{[["open", "For sale"], ["free", "Free items"], ["all", "All"], ...(userId ? [["mine", "My listings"]] : [])].map(([k, label]) => <Button key={k} size="sm" variant={show === k ? "default" : "outline"} onClick={() => setShow(k ?? "open")}>{label}</Button>)}</div>
     </div>
     {listings.isLoading && <p className="mt-6 text-muted-foreground">Loading…</p>}
     {listings.isError && <p className="mt-6 text-destructive">Could not load the marketplace.</p>}
