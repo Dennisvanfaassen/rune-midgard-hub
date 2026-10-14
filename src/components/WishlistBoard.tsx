@@ -90,13 +90,13 @@ export function WishlistBoard({ newest = false }: { newest?: boolean }) {
         return <article key={owner} className="rounded-lg border border-border bg-card p-4">
           <Link to="/members/$id" params={{ id: owner }} className="flex items-center gap-3 border-b border-border pb-3">
             <CharacterPortrait path={p.avatar_path} name={p.char_name || p.display_name} className="h-14 w-12" />
-            <div><h3 className="font-bold text-primary">{p.char_name || p.display_name}</h3><p className="text-xs text-muted-foreground">{items.filter((g) => g.status === "need").length} still needed · {items.filter((g) => g.status === "have").length} owned</p></div>
+            <div><h3 className="font-bold text-primary">{p.char_name || p.display_name}</h3><p className="text-xs text-muted-foreground">{items.filter((g) => g.status === "need").reduce((sum, g) => sum + (g.quantity ?? 1), 0)} items needed · {items.filter((g) => g.status === "have").reduce((sum, g) => sum + (g.quantity ?? 1), 0)} owned</p></div>
           </Link>
           <ul className="divide-y divide-border">{(newest ? items.slice(0, 4) : items).map((g) => {
             const name = itemDisplay(g.item_key, g.item_name);
             return <li key={g.id} className="flex items-start gap-2 py-3">
               {g.status === "have" ? <Check className="mt-1 h-4 w-4 shrink-0 text-success" /> : <Crosshair className="mt-1 h-4 w-4 shrink-0 text-accent" />}
-              <div className="min-w-0 flex-1"><p className="text-sm font-semibold">{name}</p><p className="text-xs text-muted-foreground">{g.status === "have" ? "I have this gear" : "I still need this gear"}</p>
+              <div className="min-w-0 flex-1"><p className="text-sm font-semibold">{name} <span className="text-primary">×{g.quantity ?? 1}</span></p><p className="text-xs text-muted-foreground">{g.status === "have" ? "I have this gear" : "I still need this gear"}</p>
                 {g.status === "need" && <HelpOffers wishlistId={g.id} owner={owner} offers={g.wishlist_help as HelpOffer[]} onChange={refresh} />}
               </div>
               {owner === userId && <Button aria-label={`Change ownership of ${name}`} title={g.status === "have" ? "I still need this gear" : "I have this gear"} size="icon" variant="ghost" disabled={!!pending} className="h-8 w-8 shrink-0" onClick={() => toggle(g.id, g.status, owner)}>{g.status === "have" ? <Crosshair /> : <Check />}</Button>}
