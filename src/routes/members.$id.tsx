@@ -12,7 +12,8 @@ import { JobSelect } from "@/components/JobSelect";
 import { jobName, itemLabel } from "@/lib/ro/jobs";
 import { itemDisplay } from "@/lib/ro/slots";
 import { HelpOffers, type HelpOffer } from "@/components/WishlistBoard";
-import { loadEngine, loadSkt, type Engine, type SktData } from "@/lib/ro/engine";
+import { loadEngine, type Engine } from "@/lib/ro/engine";
+import { XynklonBuild, type ExternalBuild } from "@/components/XynklonBuild";
 
 export const Route = createFileRoute("/members/$id")({
   head: () => ({
@@ -28,8 +29,6 @@ export const Route = createFileRoute("/members/$id")({
   component: Profile,
 });
 
-type StatBuild = { build: { buffs?: Record<string, any>; pet?: { mob: string; loyal: boolean }; manual?: Record<string, number>; combat?: { mob: string }; stats: Record<string, number>; equip: Record<string, { key: string; refine: number; cards: string[] }> }; summary: Record<string, number | string> };
-type SkillBuild = { job: string; jl: number; lv: Record<string, number> };
 
 function Profile() {
   const { id } = Route.useParams();
@@ -45,14 +44,12 @@ function Profile() {
     queryFn: async () => (await supabase.from("gear_wishlist").select("*,wishlist_help(id,kind,helper_id,message,profiles(display_name,char_name))").eq("user_id", id).order("created_at")).data ?? [],
   });
   const [engine, setEngine] = useState<Engine | null>(null);
-  const [skt, setSkt] = useState<SktData | null>(null);
-  useEffect(() => { loadEngine().then(setEngine); loadSkt().then(setSkt); }, []);
+  useEffect(() => { loadEngine().then(setEngine); }, []);
 
   if (isLoading) return <main className="mx-auto max-w-5xl px-4 py-10 text-muted-foreground">Loading…</main>;
   if (!p) return <main className="mx-auto max-w-5xl px-4 py-10">Member not found. <Link to="/members" className="text-primary">Back to members</Link></main>;
 
-  const sb = p.stat_build as unknown as StatBuild | null;
-  const kb = p.skill_build as unknown as SkillBuild | null;
+  const linkedBuild = p.stat_build as ExternalBuild | null;
   const refresh = () => { qc.invalidateQueries({ queryKey: ["gear", id] }); qc.invalidateQueries({ queryKey: ["wishlists"] }); qc.invalidateQueries({ queryKey: ["members"] }); };
 
   return (
@@ -67,47 +64,7 @@ function Profile() {
         {isOwner && <EditProfile p={p} onSaved={() => { qc.invalidateQueries({ queryKey: ["profile", id] }); qc.invalidateQueries({ queryKey: ["members"] }); qc.invalidateQueries({ queryKey: ["wishlists"] }); }} />}
       </section>
 
-      <section className="grid gap-6 md:grid-cols-2">
-        <div className="rounded-lg border border-border bg-card p-6">
-          <h2 className="text-xl font-bold">Stat build</h2>
-          {sb ? (
-            <>
-              <div className="mt-3 grid grid-cols-3 gap-2 text-sm">
-                {Object.entries(sb.build.stats).map(([k, v]) => <div key={k} className="rounded bg-secondary px-2 py-1"><span className="uppercase text-muted-foreground">{k}</span> {v}</div>)}
-              </div>
-              <div className="mt-3 grid grid-cols-2 gap-x-4 text-sm">
-                {Object.entries(sb.summary).map(([k, v]) => <div key={k} className="flex justify-between border-b border-border py-1"><span className="text-muted-foreground">{k}</span><span>{v}</span></div>)}
-              </div>
-              {engine && <div className="mt-4 space-y-2 text-xs text-muted-foreground">
-                {sb.build.pet && <p>Pet: {engine.mobNames[sb.build.pet.mob] || sb.build.pet.mob}{sb.build.pet.loyal ? " · Loyal" : ""}</p>}
-                {sb.build.combat && <p>Combat target: {engine.mobNames[sb.build.combat.mob] || sb.build.combat.mob}</p>}
-                {!!sb.build.buffs && <p>{engine.CalcStatus.BUFFS.filter((b) => !!sb.build.buffs?.[b.id]).map((b) => `${b.name}${typeof sb.build.buffs?.[b.id] === "number" ? ` ${sb.build.buffs[b.id]}` : ""}`).join(" · ")}</p>}
-              </div>}
-              {engine && (
-                <ul className="mt-3 space-y-1 text-sm">
-                  {Object.entries(sb.build.equip).filter(([, e]) => e?.key).map(([slot, e]) => (
-                    <li key={slot}><span className="text-muted-foreground">{slot}:</span> {e.refine ? `+${e.refine} ` : ""}{itemLabel(engine.itemsByKey[e.key] ?? { name: e.key })}
-                      {e.cards.filter(Boolean).length > 0 && <span className="text-muted-foreground"> [{e.cards.filter(Boolean).map((c) => engine.itemsByKey[c]?.name ?? c).join(", ")}]</span>}</li>
-                  ))}
-                </ul>
-              )}
-            </>
-          ) : <p className="mt-2 text-sm text-muted-foreground">No stat build saved yet.{isOwner && <> Use the <Link to="/calculator" className="text-primary">Stat Calculator</Link>.</>}</p>}
-        </div>
-        <div className="rounded-lg border border-border bg-card p-6">
-          <h2 className="text-xl font-bold">Skill build</h2>
-          {kb && skt ? (
-            <>
-              <p className="text-sm text-primary">{jobName(kb.job)}</p>
-              <ul className="mt-3 grid grid-cols-1 gap-1 text-sm sm:grid-cols-2">
-                {Object.entries(kb.lv).filter(([k]) => !skt.skills[k]?.quest).map(([k, v]) => (
-                  <li key={k} className="flex justify-between rounded bg-secondary px-2 py-1"><span>{skt.skills[k]?.name ?? k}</span><span className="text-primary">{v}</span></li>
-                ))}
-              </ul>
-            </>
-          ) : <p className="mt-2 text-sm text-muted-foreground">No skill build saved yet.{isOwner && <> Use the <Link to="/skills" className="text-primary">Skill Simulator</Link>.</>}</p>}
-        </div>
-      </section>
+      <XynklonBuild ownerId={id} isOwner={isOwner} saved={linkedBuild?.external_url ?? null} onSaved={() => qc.invalidateQueries({ queryKey: ["profile", id] })} />
 
       <section className="rounded-lg border border-border bg-card p-6">
         <h2 className="text-xl font-bold">Gear wishlist</h2>
