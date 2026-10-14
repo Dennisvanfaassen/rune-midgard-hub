@@ -35,9 +35,26 @@ function PartyPage() {
   const { data: party, isLoading, isError: partyError, error: partyLoadError } = useQuery({
     queryKey: key, refetchInterval: 30_000,
     queryFn: async () => {
-      const { data, error } = await supabase.from("parties").select("*,profiles(display_name),party_slots(*,profiles(display_name,char_name))").eq("id", id).gt("starts_at", partyCutoff()).maybeSingle();
-      if (error) throw error;
-      return data;
+      const { data: party, error } = await supabase.from("parties").select("*").eq("id", id).gt("starts_at", partyCutoff()).maybeSingle();
+      if (error) throw new Error(`Party: ${error.message} (${error.code})`);
+      if (!party) return null;
+      const [slotResult, organiserResult] = await Promise.all([
+        supabase.from("party_slots").select("*").eq("party_id", id).order("position"),
+        supabase.from("profiles").select("id,display_name").eq("id", party.creator_id).maybeSingle(),
+      ]);
+      if (slotResult.error) throw new Error(`Party slots: ${slotResult.error.message} (${slotResult.error.code})`);
+      const slots = slotResult.data ?? [];
+      const members = [...new Set(slots.map((slot) => slot.user_id).filter((v): v is string => !!v))];
+      const memberResult = members.length ? await supabase.from("profiles").select("id,display_name,char_name").in("id", members) : null;
+      if (memberResult?.error) console.warn("Member names unavailable:", memberResult.error);
+      return {
+        ...party,
+        profiles: organiserResult.data ?? null,
+        party_slots: slots.map((slot) => ({
+          ...slot,
+          profiles: memberResult?.data?.find((member) => member.id === slot.user_id) ?? null,
+        })),
+      };
     },
   });
   const me = useQuery({
@@ -74,7 +91,7 @@ function PartyPage() {
   useEffect(() => { if (me.data?.job) setJob(me.data.job); }, [me.data?.job]);
 
   if (isLoading) return <main className="mx-auto max-w-4xl px-4 py-10 text-muted-foreground">Loading…</main>;
-  if (partyError) return <main className="mx-auto max-w-4xl px-4 py-10 text-destructive">Could not load party: {partyLoadError instanceof Error ? partyLoadError.message : "Database query failed"}</main>;
+  if (partyError) return <main className="mx-auto max-w-4xl px-4 py-10 text-destructive">Could not load party: {partyLoadError instanceof Error ? partyLoadError.message : String((partyLoadError as {message?:string})?.message ?? partyLoadError)}</main>;
   if (!party) return <main className="mx-auto max-w-4xl px-4 py-10">Party not found. <Link to="/parties" className="text-primary">Back</Link></main>;
 
   const slots = [...party.party_slots].sort((a, b) => a.position - b.position);
