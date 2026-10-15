@@ -14,18 +14,6 @@ export type Database = {
   }
   public: {
     Tables: {
-      mvp_kills: {
-        Row: { id: string; boss_key: string; map_key: string; killed_at: string; tomb_x: number | null; tomb_y: number | null; reporter_id: string; created_at: string }
-        Insert: { id?: string; boss_key: string; map_key: string; killed_at: string; tomb_x?: number | null; tomb_y?: number | null; reporter_id: string; created_at?: string }
-        Update: { id?: string; boss_key?: string; map_key?: string; killed_at?: string; tomb_x?: number | null; tomb_y?: number | null; reporter_id?: string; created_at?: string }
-        Relationships: []
-      }
-      mvp_tombs: {
-        Row: { boss_key: string; map_key: string; tomb_x: number; tomb_y: number; updated_by: string; updated_at: string }
-        Insert: { boss_key: string; map_key: string; tomb_x: number; tomb_y: number; updated_by: string; updated_at?: string }
-        Update: { boss_key?: string; map_key?: string; tomb_x?: number; tomb_y?: number; updated_by?: string; updated_at?: string }
-        Relationships: []
-      }
       forum_posts: {
         Row: {
           author_id: string
@@ -113,22 +101,22 @@ export type Database = {
         Row: {
           created_at: string
           id: string
-          quantity: number
           item_key: string
           item_name: string
           item_type: string | null
           note: string | null
+          quantity: number
           status: string
           user_id: string
         }
         Insert: {
           created_at?: string
           id?: string
-          quantity?: number
           item_key: string
           item_name: string
           item_type?: string | null
           note?: string | null
+          quantity?: number
           status?: string
           user_id: string
         }
@@ -139,6 +127,7 @@ export type Database = {
           item_name?: string
           item_type?: string | null
           note?: string | null
+          quantity?: number
           status?: string
           user_id?: string
         }
@@ -300,6 +289,66 @@ export type Database = {
             referencedColumns: ["id"]
           },
         ]
+      }
+      mvp_kills: {
+        Row: {
+          boss_key: string
+          created_at: string
+          id: string
+          killed_at: string
+          map_key: string
+          reporter_id: string
+          tomb_x: number | null
+          tomb_y: number | null
+        }
+        Insert: {
+          boss_key: string
+          created_at?: string
+          id?: string
+          killed_at: string
+          map_key: string
+          reporter_id: string
+          tomb_x?: number | null
+          tomb_y?: number | null
+        }
+        Update: {
+          boss_key?: string
+          created_at?: string
+          id?: string
+          killed_at?: string
+          map_key?: string
+          reporter_id?: string
+          tomb_x?: number | null
+          tomb_y?: number | null
+        }
+        Relationships: []
+      }
+      mvp_tombs: {
+        Row: {
+          boss_key: string
+          map_key: string
+          tomb_x: number
+          tomb_y: number
+          updated_at: string
+          updated_by: string
+        }
+        Insert: {
+          boss_key: string
+          map_key: string
+          tomb_x: number
+          tomb_y: number
+          updated_at?: string
+          updated_by: string
+        }
+        Update: {
+          boss_key?: string
+          map_key?: string
+          tomb_x?: number
+          tomb_y?: number
+          updated_at?: string
+          updated_by?: string
+        }
+        Relationships: []
       }
       parties: {
         Row: {
