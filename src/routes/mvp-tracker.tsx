@@ -18,7 +18,7 @@ export const Route = createFileRoute("/mvp-tracker")({
   component: MvpTracker,
 });
 
-type Kill = { id: string; boss_key: string; map_key: string; killed_at: string; reporter_id: string; created_at: string };
+type Kill = { id: string; boss_key: string; map_key: string; killed_at: string; reporter_id: string; killer_id: string | null; created_at: string };
 type Tomb = { boss_key: string; map_key: string; tomb_x: number; tomb_y: number; updated_by: string };
 const dateTime = (iso: string) => new Date(iso).toLocaleString(undefined, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
 const clock = (value: number) => new Date(value).toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" });
@@ -125,6 +125,7 @@ function MvpTracker() {
   const [activeTab, setActiveTab] = useState<"tracker" | "overview">("tracker");
   const [selected, setSelected] = useState(mvpSpawnId(MVP_SPAWNS[0]!));
   const [minutesAgo, setMinutesAgo] = useState("35");
+  const [creditKill, setCreditKill] = useState(true);
   const [alerts, setAlerts] = useState<string[]>([]);
   const [soundOn, setSoundOn] = useState(true);
   const audioRef = useRef<AudioContext | null>(null);
@@ -199,7 +200,7 @@ function MvpTracker() {
     refetchInterval: 15_000,
     queryFn: async () => {
       const [kills, tombs] = await Promise.all([
-        supabase.from("mvp_kills").select("id,boss_key,map_key,killed_at,reporter_id,created_at").order("killed_at", { ascending: false }).limit(500),
+        supabase.from("mvp_kills").select("id,boss_key,map_key,killed_at,reporter_id,killer_id,created_at").order("killed_at", { ascending: false }).limit(500),
         supabase.from("mvp_tombs").select("boss_key,map_key,tomb_x,tomb_y,updated_by"),
       ]);
       if (kills.error) throw kills.error;
@@ -232,6 +233,17 @@ function MvpTracker() {
   }, [userId, data, alerts, soundOn, now]);
   const spawn = MVP_SPAWNS.find((s) => mvpSpawnId(s) === selected) ?? MVP_SPAWNS[0]!;
   const recent = data?.kills.filter((k) => k.boss_key === spawn.bossKey && k.map_key === spawn.mapKey) ?? [];
+  const reporters = useQuery({
+    queryKey: ["mvp-reporters"],
+    enabled: !!userId,
+    queryFn: async () => {
+      const { data, error } = await supabase.from("profiles").select("id,display_name,char_name");
+      if (error) throw error;
+      return Object.fromEntries((data ?? []).map((profile) => [profile.id, profile.char_name || profile.display_name]));
+    },
+    staleTime: 60_000,
+  });
+  const reporterName = (id: string) => reporters.data?.[id] ?? "Guild member";
   const kill = recent[0];
   const tomb = data?.tombs.find((p) => p.boss_key === spawn.bossKey && p.map_key === spawn.mapKey);
   const filtered = MVP_SPAWNS.filter((s) => `${s.name} ${s.mapName} ${s.mapKey}`.toLowerCase().includes(search.trim().toLowerCase()));
@@ -258,10 +270,11 @@ function MvpTracker() {
     const { error } = await supabase.from("mvp_kills").insert({
       boss_key: spawn.bossKey, map_key: spawn.mapKey, killed_at: when.toISOString(), reporter_id: userId,
       tomb_x: tomb?.tomb_x ?? null, tomb_y: tomb?.tomb_y ?? null,
+      killer_id: creditKill ? userId : null,
     });
     setBusy(false);
     if (error) toast.error(error.message);
-    else { toast.success(`${spawn.name} kill recorded`); refresh(); }
+    else { toast.success(`${spawn.name} kill recorded`); refresh(); qc.invalidateQueries({ queryKey: ["guild-achievements"] }); }
   }
   async function savePin() {
     if (!userId || !pendingPin) return;
@@ -280,7 +293,7 @@ function MvpTracker() {
     setBusy(true);
     const { error } = await supabase.from("mvp_kills").delete().eq("id", id).eq("reporter_id", userId);
     setBusy(false);
-    if (error) toast.error(error.message); else { toast.success("Kill report removed"); refresh(); }
+    if (error) toast.error(error.message); else { toast.success("Kill report removed"); refresh(); qc.invalidateQueries({ queryKey: ["guild-achievements"] }); }
   }
 
   return <main className="mx-auto max-w-7xl px-4 py-8 md:py-12">
@@ -393,6 +406,7 @@ function MvpTracker() {
               <div className="rounded-xl border border-border p-5">
                 <h3 className="font-semibold">Report an MVP kill</h3>
                 <p className="mt-1 text-xs text-muted-foreground">Your report immediately updates the guild-wide timer.</p>
+                <label className="mt-4 flex items-start gap-2 rounded-lg border border-border bg-secondary/30 p-3 text-sm"><input type="checkbox" checked={creditKill} onChange={(e) => setCreditKill(e.target.checked)} className="mt-1"/> <span><strong>I participated in this MVP kill</strong><span className="mt-0.5 block text-xs text-muted-foreground">Counts toward your self-reported MVP Killer achievement. Uncheck if you are only recording the timer for someone else.</span></span></label>
                 <Button className="mt-4 w-full" disabled={busy || !!error} onClick={() => report(new Date())}><Zap className="mr-2 h-4 w-4"/>Killed now</Button>
                 <div className="my-4 flex items-center gap-3 text-xs text-muted-foreground"><span className="h-px flex-1 bg-border"/><span>or report a past kill</span><span className="h-px flex-1 bg-border"/></div>
                 <label htmlFor="mvp-minutes-ago" className="text-xs font-medium">How many minutes ago was the kill?</label>
@@ -416,7 +430,7 @@ function MvpTracker() {
         <section className="rounded-xl border border-border bg-card p-5 md:p-6">
           <div className="mb-4 flex items-center justify-between gap-2"><div><h3 className="text-lg font-bold">Kill history</h3><p className="text-xs text-muted-foreground">Last reports for this MVP and map</p></div><Crosshair className="h-5 w-5 text-muted-foreground"/></div>
           {!recent.length ? <p className="rounded-lg bg-secondary/30 p-4 text-sm text-muted-foreground">No kills reported yet. Be the first to track this MVP.</p> :
-          <div className="divide-y divide-border">{recent.slice(0, 15).map((entry, index) => <div key={entry.id} className="flex items-center justify-between gap-3 py-3 text-sm"><div><span className="font-semibold">{dateTime(entry.killed_at)}</span>{index === 0 && <span className="ml-2 rounded bg-primary/10 px-2 py-0.5 text-[10px] font-semibold text-primary">Current timer</span>}<p className="text-xs text-muted-foreground">Recorded {dateTime(entry.created_at)}</p></div>{entry.reporter_id === userId && <Button size="sm" variant="ghost" disabled={busy} aria-label="Undo this kill report" title="Undo your report" onClick={() => undo(entry.id)}><Trash2 className="h-4 w-4"/></Button>}</div>)}</div>}
+          <div className="divide-y divide-border">{recent.slice(0, 15).map((entry, index) => <div key={entry.id} className="flex items-center justify-between gap-3 py-3 text-sm"><div><span className="font-semibold">{dateTime(entry.killed_at)}</span>{index === 0 && <span className="ml-2 rounded bg-primary/10 px-2 py-0.5 text-[10px] font-semibold text-primary">Current timer</span>}<p className="text-xs text-muted-foreground">Reported by <Link to="/members/$id" params={{id:entry.reporter_id}} className="font-semibold text-primary hover:underline">{reporterName(entry.reporter_id)}</Link> · {dateTime(entry.created_at)}</p>{entry.killer_id && <p className="text-xs text-emerald-600">Self-reported kill: {reporterName(entry.killer_id)}</p>}</div>{entry.reporter_id === userId && <Button size="sm" variant="ghost" disabled={busy} aria-label="Undo this kill report" title="Undo your report" onClick={() => undo(entry.id)}><Trash2 className="h-4 w-4"/></Button>}</div>)}</div>}
         </section>
         <p className="text-xs leading-relaxed text-muted-foreground">MVP spawn locations and reference timers are historical Episode 8.2 estimates, not yet validated against SoulBound's server configuration. GAT maps load directly from your extracted Ragnarokmap repository; unavailable maps cannot be pinned.</p>
       </div>
