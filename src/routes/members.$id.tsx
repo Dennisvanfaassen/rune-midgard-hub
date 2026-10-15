@@ -62,6 +62,7 @@ function Profile() {
         <CharacterPortrait path={p.avatar_path} name={p.char_name || p.display_name} className="h-36 w-28" />
         <div className="min-w-0"><h1 className="flex flex-wrap items-center gap-2 text-4xl font-bold">{p.char_name || p.display_name}<GuildBadge role={guildRole.data} /></h1>
         <p className="mt-1 text-primary">{jobName(p.job)} · Base {p.base_lv} / Job {p.job_lv} · {guildRole.data ?? "Guildmember"}</p>
+        {p.birthday_month && p.birthday_day && <p className="mt-2 text-sm text-muted-foreground">🎂 Birthday: {new Date(2024,p.birthday_month-1,p.birthday_day).toLocaleDateString(undefined,{month:"long",day:"numeric"})}</p>}
         {p.bio && <p className="mt-3 whitespace-pre-line text-muted-foreground">{p.bio}</p>}
         </div></div>
         {isOwner && <ThemePreference />}
@@ -108,8 +109,8 @@ function Profile() {
   );
 }
 
-function EditProfile({ p, onSaved }: { p: { id: string; display_name: string; char_name: string | null; job: string; base_lv: number; job_lv: number; bio: string | null; avatar_path: string | null }; onSaved: () => void }) {
-  const [f, setF] = useState({ display_name: p.display_name, char_name: p.char_name ?? "", job: p.job, base_lv: p.base_lv, job_lv: p.job_lv, bio: p.bio ?? "" });
+function EditProfile({ p, onSaved }: { p: { id: string; display_name: string; char_name: string | null; job: string; base_lv: number; job_lv: number; bio: string | null; avatar_path: string | null; birthday_month: number | null; birthday_day: number | null }; onSaved: () => void }) {
+  const [f, setF] = useState({ display_name: p.display_name, char_name: p.char_name ?? "", job: p.job, base_lv: p.base_lv, job_lv: p.job_lv, bio: p.bio ?? "", birthday_month: p.birthday_month ? String(p.birthday_month) : "", birthday_day: p.birthday_day ? String(p.birthday_day) : "" });
   const [open, setOpen] = useState(false);
   const [uploading, setUploading] = useState(false);
   async function uploadPortrait(file?: File) {
@@ -139,11 +140,14 @@ function EditProfile({ p, onSaved }: { p: { id: string; display_name: string; ch
         <Input type="number" min={1} max={99} value={f.base_lv} onChange={(e) => setF({ ...f, base_lv: +e.target.value })} />
         <Input type="number" min={1} max={70} value={f.job_lv} onChange={(e) => setF({ ...f, job_lv: +e.target.value })} />
       </div>
+      <div className="sm:col-span-2 rounded-lg border border-border p-3"><p className="mb-2 text-sm font-semibold">Birthday (optional)</p><p className="mb-3 text-xs text-muted-foreground">Only your month and day appear on the guild calendar. Your birth year is not collected.</p><div className="flex gap-3"><select aria-label="Birthday month" className="flex-1 rounded-md border border-input bg-background p-2 text-sm" value={f.birthday_month} onChange={(e) => setF({...f,birthday_month:e.target.value})}><option value="">Month (hidden)</option>{Array.from({length:12},(_,i)=><option key={i+1} value={i+1}>{new Date(2024,i,1).toLocaleString(undefined,{month:"long"})}</option>)}</select><select aria-label="Birthday day" className="w-28 rounded-md border border-input bg-background p-2 text-sm" value={f.birthday_day} onChange={(e) => setF({...f,birthday_day:e.target.value})}><option value="">Day</option>{Array.from({length:31},(_,i)=><option key={i+1} value={i+1}>{i+1}</option>)}</select></div></div>
       <Textarea className="sm:col-span-2" placeholder="About you" maxLength={500} value={f.bio} onChange={(e) => setF({ ...f, bio: e.target.value })} />
       <div className="flex gap-2">
         <Button onClick={async () => {
+          const month = Number(f.birthday_month), day = Number(f.birthday_day);
+          if ((!!f.birthday_month !== !!f.birthday_day) || (month && day && (day > new Date(2024, month, 0).getDate()))) { toast.error("Choose a valid birthday month and day, or leave both blank."); return; }
           const { error } = await supabase.from("profiles").update({
-            ...f, display_name: f.display_name.trim() || "Adventurer", char_name: f.char_name.trim() || null,
+            ...f, birthday_month: month || null, birthday_day: day || null, display_name: f.display_name.trim() || "Adventurer", char_name: f.char_name.trim() || null,
             base_lv: Math.min(99, Math.max(1, f.base_lv | 0)), job_lv: Math.min(70, Math.max(1, f.job_lv | 0)),
           }).eq("id", p.id);
           if (error) toast.error(error.message); else { toast.success("Profile saved"); setOpen(false); onSaved(); }
