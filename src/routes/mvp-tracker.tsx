@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { useAuth } from "@/lib/auth";
 import { supabase } from "@/integrations/supabase/client";
-import { MVP_SPAWNS, mvpSpawnId, type MvpSpawn } from "@/lib/ro/mvp-spawns";
+import { MVP_SPAWNS, MINI_BOSS_SPAWNS, BOSS_SPAWNS, mvpSpawnId, type MvpSpawn } from "@/lib/ro/mvp-spawns";
 import { MVP_DROPS } from "@/lib/ro/mvp-drops";
 
 export const Route = createFileRoute("/mvp-tracker")({
@@ -122,6 +122,7 @@ function MvpTracker() {
   const { userId } = useAuth();
   const qc = useQueryClient();
   const [search, setSearch] = useState("");
+  const [bossType, setBossType] = useState<"mvp" | "mini">("mvp");
   const [activeTab, setActiveTab] = useState<"tracker" | "overview">("tracker");
   const [selected, setSelected] = useState(mvpSpawnId(MVP_SPAWNS[0]!));
   const [minutesAgo, setMinutesAgo] = useState("35");
@@ -211,7 +212,7 @@ function MvpTracker() {
   useEffect(() => {
     if (!userId || !data || !alerts.length) return;
     const current = Date.now();
-    for (const spawn of MVP_SPAWNS) {
+    for (const spawn of BOSS_SPAWNS) {
       const id = mvpSpawnId(spawn);
       if (!alerts.includes(id)) continue;
       const kill = data.kills.find((k) => k.boss_key === spawn.bossKey && k.map_key === spawn.mapKey);
@@ -231,7 +232,8 @@ function MvpTracker() {
       }
     }
   }, [userId, data, alerts, soundOn, now]);
-  const spawn = MVP_SPAWNS.find((s) => mvpSpawnId(s) === selected) ?? MVP_SPAWNS[0]!;
+  const bossList = bossType === "mini" ? MINI_BOSS_SPAWNS : MVP_SPAWNS;
+  const spawn = bossList.find((s) => mvpSpawnId(s) === selected) ?? bossList[0]!;
   const recent = data?.kills.filter((k) => k.boss_key === spawn.bossKey && k.map_key === spawn.mapKey) ?? [];
   const reporters = useQuery({
     queryKey: ["mvp-reporters"],
@@ -246,12 +248,12 @@ function MvpTracker() {
   const reporterName = (id: string) => reporters.data?.[id] ?? "Guild member";
   const kill = recent[0];
   const tomb = data?.tombs.find((p) => p.boss_key === spawn.bossKey && p.map_key === spawn.mapKey);
-  const filtered = MVP_SPAWNS.filter((s) => `${s.name} ${s.mapName} ${s.mapKey}`.toLowerCase().includes(search.trim().toLowerCase()));
+  const filtered = bossList.filter((s) => `${s.name} ${s.mapName} ${s.mapKey}`.toLowerCase().includes(search.trim().toLowerCase()));
   const minSpawn = kill ? new Date(kill.killed_at).getTime() + spawn.minMinutes * 60_000 : null;
   const maxSpawn = kill ? new Date(kill.killed_at).getTime() + spawn.maxMinutes * 60_000 : null;
   const current = status(spawn, kill, now);
   const drops = MVP_DROPS[spawn.bossKey] ?? [];
-  const tracked = MVP_SPAWNS.flatMap((entry) => {
+  const tracked = bossList.flatMap((entry) => {
     const latest = data?.kills.find((k) => k.boss_key === entry.bossKey && k.map_key === entry.mapKey);
     if (!latest) return [];
     const earliest = new Date(latest.killed_at).getTime() + entry.minMinutes * 60_000;
@@ -270,7 +272,7 @@ function MvpTracker() {
     const { error } = await supabase.from("mvp_kills").insert({
       boss_key: spawn.bossKey, map_key: spawn.mapKey, killed_at: when.toISOString(), reporter_id: userId,
       tomb_x: tomb?.tomb_x ?? null, tomb_y: tomb?.tomb_y ?? null,
-      killer_id: creditKill ? userId : null,
+      killer_id: spawn.kind !== "mini" && creditKill ? userId : null,
     });
     setBusy(false);
     if (error) toast.error(error.message);
@@ -303,10 +305,14 @@ function MvpTracker() {
         <h1 className="font-display text-3xl font-bold tracking-tight md:text-4xl">MVP Tracker</h1>
         <p className="mt-2 max-w-2xl text-sm text-muted-foreground">Coordinate hunts with live respawn windows, shared kill reports and tomb markers. Episode 8.2 reference timings.</p>
       </div>
-      <span className="rounded-full border border-border bg-card px-4 py-2 text-sm text-muted-foreground">{MVP_SPAWNS.length} map spawns · {new Set(MVP_SPAWNS.map((s) => s.bossKey)).size} MVPs</span>
+      <span className="rounded-full border border-border bg-card px-4 py-2 text-sm text-muted-foreground">{MVP_SPAWNS.length} MVP maps · {MINI_BOSS_SPAWNS.length} mini-boss maps</span>
     </div>
     {!userId ? <div className="rounded-xl border border-border bg-card p-8 text-center"><h2 className="text-xl font-semibold">Guild members only</h2><p className="my-3 text-muted-foreground">Sign in to see shared MVP timers and report kills.</p><Button asChild><Link to="/auth">Sign in</Link></Button></div> :
     <div>
+      <div className="mb-3 flex flex-wrap gap-2" aria-label="Boss category">
+        <Button size="sm" variant={bossType === "mvp" ? "default" : "outline"} onClick={() => { setBossType("mvp"); setPendingPin(null); }}>MVP Bosses</Button>
+        <Button size="sm" variant={bossType === "mini" ? "default" : "outline"} onClick={() => { setBossType("mini"); setPendingPin(null); }}>Mini-Bosses</Button>
+      </div>
       <div role="tablist" aria-label="MVP tracker views" className="mb-6 flex w-fit gap-1 rounded-xl border border-border bg-secondary/50 p-1">
         <button role="tab" type="button" aria-selected={activeTab === "tracker"} onClick={() => setActiveTab("tracker")} className={`rounded-lg px-5 py-2.5 text-sm font-semibold transition ${activeTab === "tracker" ? "bg-card text-primary shadow-sm" : "text-muted-foreground hover:text-foreground"}`}>MVP Tracker</button>
         <button role="tab" type="button" aria-selected={activeTab === "overview"} onClick={() => setActiveTab("overview")} className={`rounded-lg px-5 py-2.5 text-sm font-semibold transition ${activeTab === "overview" ? "bg-card text-primary shadow-sm" : "text-muted-foreground hover:text-foreground"}`}>Respawn Overview <span className="ml-1 rounded-full bg-background/70 px-1.5 py-0.5 text-xs">{tracked.length}</span></button>
@@ -406,7 +412,7 @@ function MvpTracker() {
               <div className="rounded-xl border border-border p-5">
                 <h3 className="font-semibold">Report an MVP kill</h3>
                 <p className="mt-1 text-xs text-muted-foreground">Your report immediately updates the guild-wide timer.</p>
-                <label className="mt-4 flex items-start gap-2 rounded-lg border border-border bg-secondary/30 p-3 text-sm"><input type="checkbox" checked={creditKill} onChange={(e) => setCreditKill(e.target.checked)} className="mt-1"/> <span><strong>I participated in this MVP kill</strong><span className="mt-0.5 block text-xs text-muted-foreground">Counts toward your self-reported MVP Killer achievement. Uncheck if you are only recording the timer for someone else.</span></span></label>
+                {spawn.kind !== "mini" && <label className="mt-4 flex items-start gap-2 rounded-lg border border-border bg-secondary/30 p-3 text-sm"><input type="checkbox" checked={creditKill} onChange={(e) => setCreditKill(e.target.checked)} className="mt-1"/> <span><strong>I participated in this MVP kill</strong><span className="mt-0.5 block text-xs text-muted-foreground">Counts toward your self-reported MVP Killer achievement. Uncheck if you are only recording the timer for someone else.</span></span></label>}
                 <Button className="mt-4 w-full" disabled={busy || !!error} onClick={() => report(new Date())}><Zap className="mr-2 h-4 w-4"/>Killed now</Button>
                 <div className="my-4 flex items-center gap-3 text-xs text-muted-foreground"><span className="h-px flex-1 bg-border"/><span>or report a past kill</span><span className="h-px flex-1 bg-border"/></div>
                 <label htmlFor="mvp-minutes-ago" className="text-xs font-medium">How many minutes ago was the kill?</label>
