@@ -5,6 +5,7 @@ import { useAuth } from "@/lib/auth";
 import { Button } from "@/components/ui/button";
 import { useQuery } from "@tanstack/react-query";
 import crest from "@/assets/guild-blue-bird.png.asset.json";
+import { WishlistNotifications } from "@/components/WishlistNotifications";
 
 const NAV = [
   { to: "/parties", label: "Party Planner" },
@@ -44,6 +45,7 @@ export function SiteHeader() {
         <div className="ml-auto flex items-center gap-2">
           {ready && userId ? (
             <>
+              <WishlistNotifications />
               {guildRole.data === "Admin" && <Button asChild variant="outline" size="sm"><Link to="/admin">Admin</Link></Button>}
               <Button asChild variant="outline" size="sm"><Link to="/members/$id" params={{ id: userId }}>My profile</Link></Button>
               <Button variant="ghost" size="sm" onClick={signOut}>Sign out</Button>
