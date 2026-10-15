@@ -14,6 +14,18 @@ export type Database = {
   }
   public: {
     Tables: {
+      mvp_kills: {
+        Row: { id: string; boss_key: string; map_key: string; killed_at: string; tomb_x: number | null; tomb_y: number | null; reporter_id: string; created_at: string }
+        Insert: { id?: string; boss_key: string; map_key: string; killed_at: string; tomb_x?: number | null; tomb_y?: number | null; reporter_id: string; created_at?: string }
+        Update: { id?: string; boss_key?: string; map_key?: string; killed_at?: string; tomb_x?: number | null; tomb_y?: number | null; reporter_id?: string; created_at?: string }
+        Relationships: []
+      }
+      mvp_tombs: {
+        Row: { boss_key: string; map_key: string; tomb_x: number; tomb_y: number; updated_by: string; updated_at: string }
+        Insert: { boss_key: string; map_key: string; tomb_x: number; tomb_y: number; updated_by: string; updated_at?: string }
+        Update: { boss_key?: string; map_key?: string; tomb_x?: number; tomb_y?: number; updated_by?: string; updated_at?: string }
+        Relationships: []
+      }
       forum_posts: {
         Row: {
           author_id: string
