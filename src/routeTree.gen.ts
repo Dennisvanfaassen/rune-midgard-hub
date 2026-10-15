@@ -13,6 +13,7 @@ import { Route as IndexRouteImport } from './routes/index'
 import { Route as AdminRouteImport } from './routes/admin'
 import { Route as AuthRouteImport } from './routes/auth'
 import { Route as CalculatorRouteImport } from './routes/calculator'
+import { Route as CalendarRouteImport } from './routes/calendar'
 import { Route as MarketRouteImport } from './routes/market'
 import { Route as MvpTrackerRouteImport } from './routes/mvp-tracker'
 import { Route as SkillsRouteImport } from './routes/skills'
@@ -43,6 +44,11 @@ const AuthRoute = AuthRouteImport.update({
 const CalculatorRoute = CalculatorRouteImport.update({
   id: '/calculator',
   path: '/calculator',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const CalendarRoute = CalendarRouteImport.update({
+  id: '/calendar',
+  path: '/calendar',
   getParentRoute: () => rootRouteImport,
 } as any)
 const MarketRoute = MarketRouteImport.update({
@@ -106,6 +112,7 @@ export interface FileRoutesByFullPath {
   '/admin': typeof AdminRoute
   '/auth': typeof AuthRoute
   '/calculator': typeof CalculatorRoute
+  '/calendar': typeof CalendarRoute
   '/market': typeof MarketRoute
   '/mvp-tracker': typeof MvpTrackerRoute
   '/skills': typeof SkillsRoute
@@ -123,6 +130,7 @@ export interface FileRoutesByTo {
   '/admin': typeof AdminRoute
   '/auth': typeof AuthRoute
   '/calculator': typeof CalculatorRoute
+  '/calendar': typeof CalendarRoute
   '/market': typeof MarketRoute
   '/mvp-tracker': typeof MvpTrackerRoute
   '/skills': typeof SkillsRoute
@@ -141,6 +149,7 @@ export interface FileRoutesById {
   '/admin': typeof AdminRoute
   '/auth': typeof AuthRoute
   '/calculator': typeof CalculatorRoute
+  '/calendar': typeof CalendarRoute
   '/market': typeof MarketRoute
   '/mvp-tracker': typeof MvpTrackerRoute
   '/skills': typeof SkillsRoute
@@ -160,6 +169,7 @@ export interface FileRouteTypes {
     | '/admin'
     | '/auth'
     | '/calculator'
+    | '/calendar'
     | '/market'
     | '/mvp-tracker'
     | '/skills'
@@ -177,6 +187,7 @@ export interface FileRouteTypes {
     | '/admin'
     | '/auth'
     | '/calculator'
+    | '/calendar'
     | '/market'
     | '/mvp-tracker'
     | '/skills'
@@ -194,6 +205,7 @@ export interface FileRouteTypes {
     | '/admin'
     | '/auth'
     | '/calculator'
+    | '/calendar'
     | '/market'
     | '/mvp-tracker'
     | '/skills'
@@ -212,6 +224,7 @@ export interface RootRouteChildren {
   AdminRoute: typeof AdminRoute
   AuthRoute: typeof AuthRoute
   CalculatorRoute: typeof CalculatorRoute
+  CalendarRoute: typeof CalendarRoute
   MarketRoute: typeof MarketRoute
   MvpTrackerRoute: typeof MvpTrackerRoute
   SkillsRoute: typeof SkillsRoute
@@ -253,6 +266,13 @@ declare module '@tanstack/react-router' {
       path: '/calculator'
       fullPath: '/calculator'
       preLoaderRoute: typeof CalculatorRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/calendar': {
+      id: '/calendar'
+      path: '/calendar'
+      fullPath: '/calendar'
+      preLoaderRoute: typeof CalendarRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/market': {
@@ -340,6 +360,7 @@ const rootRouteChildren: RootRouteChildren = {
   AdminRoute: AdminRoute,
   AuthRoute: AuthRoute,
   CalculatorRoute: CalculatorRoute,
+  CalendarRoute: CalendarRoute,
   MarketRoute: MarketRoute,
   MvpTrackerRoute: MvpTrackerRoute,
   SkillsRoute: SkillsRoute,

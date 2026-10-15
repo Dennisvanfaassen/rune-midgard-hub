@@ -14,12 +14,6 @@ export type Database = {
   }
   public: {
     Tables: {
-      guild_notifications: {
-        Row: { id: string; recipient_id: string; actor_id: string; kind: string; wishlist_id: string | null; item_name: string; created_at: string; read_at: string | null }
-        Insert: { id?: string; recipient_id: string; actor_id: string; kind: string; wishlist_id?: string | null; item_name: string; created_at?: string; read_at?: string | null }
-        Update: { id?: string; recipient_id?: string; actor_id?: string; kind?: string; wishlist_id?: string | null; item_name?: string; created_at?: string; read_at?: string | null }
-        Relationships: []
-      }
       forum_posts: {
         Row: {
           author_id: string
@@ -165,6 +159,61 @@ export type Database = {
         }
         Relationships: []
       }
+      guild_notifications: {
+        Row: {
+          actor_id: string
+          created_at: string
+          id: string
+          item_name: string
+          kind: string
+          read_at: string | null
+          recipient_id: string
+          wishlist_id: string | null
+        }
+        Insert: {
+          actor_id: string
+          created_at?: string
+          id?: string
+          item_name: string
+          kind: string
+          read_at?: string | null
+          recipient_id: string
+          wishlist_id?: string | null
+        }
+        Update: {
+          actor_id?: string
+          created_at?: string
+          id?: string
+          item_name?: string
+          kind?: string
+          read_at?: string | null
+          recipient_id?: string
+          wishlist_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "guild_notifications_actor_id_fkey"
+            columns: ["actor_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "guild_notifications_recipient_id_fkey"
+            columns: ["recipient_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "guild_notifications_wishlist_id_fkey"
+            columns: ["wishlist_id"]
+            isOneToOne: false
+            referencedRelation: "gear_wishlist"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       market_comments: {
         Row: {
           author_id: string
@@ -302,9 +351,9 @@ export type Database = {
           created_at: string
           id: string
           killed_at: string
+          killer_id: string | null
           map_key: string
           reporter_id: string
-          killer_id: string | null
           tomb_x: number | null
           tomb_y: number | null
         }
@@ -313,9 +362,9 @@ export type Database = {
           created_at?: string
           id?: string
           killed_at: string
+          killer_id?: string | null
           map_key: string
           reporter_id: string
-          killer_id?: string | null
           tomb_x?: number | null
           tomb_y?: number | null
         }
@@ -324,9 +373,9 @@ export type Database = {
           created_at?: string
           id?: string
           killed_at?: string
+          killer_id?: string | null
           map_key?: string
           reporter_id?: string
-          killer_id?: string | null
           tomb_x?: number | null
           tomb_y?: number | null
         }
@@ -645,8 +694,8 @@ export type Database = {
           avatar_path: string | null
           base_lv: number
           bio: string | null
-          birthday_month: number | null
           birthday_day: number | null
+          birthday_month: number | null
           char_name: string | null
           created_at: string
           display_name: string
@@ -661,8 +710,8 @@ export type Database = {
           avatar_path?: string | null
           base_lv?: number
           bio?: string | null
-          birthday_month?: number | null
           birthday_day?: number | null
+          birthday_month?: number | null
           char_name?: string | null
           created_at?: string
           display_name?: string
@@ -677,8 +726,8 @@ export type Database = {
           avatar_path?: string | null
           base_lv?: number
           bio?: string | null
-          birthday_month?: number | null
           birthday_day?: number | null
+          birthday_month?: number | null
           char_name?: string | null
           created_at?: string
           display_name?: string
