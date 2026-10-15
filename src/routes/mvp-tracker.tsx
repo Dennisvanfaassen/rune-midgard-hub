@@ -182,6 +182,17 @@ function MvpTracker() {
     setAlerts(next); localStorage.setItem(`mvp-alerts:${userId}`, JSON.stringify(next));
     toast.success("Respawn alert enabled while the tracker is open");
   }
+  async function setSoundEnabled(enabled: boolean) {
+    setSoundOn(enabled);
+    if (userId) localStorage.setItem(`mvp-sound:${userId}`, enabled ? "on" : "off");
+    if (enabled) {
+      try {
+        audioRef.current ??= new AudioContext();
+        await audioRef.current.resume();
+        chime();
+      } catch { toast.info("Sound may require browser audio permission."); }
+    }
+  }
   const { data, isLoading, error } = useQuery({
     queryKey: ["mvp-tracker"],
     enabled: !!userId,
@@ -292,21 +303,46 @@ function MvpTracker() {
           <section className="overflow-hidden rounded-xl border border-border bg-card">
           <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border p-5 md:px-6">
             <div><h2 className="font-display text-xl font-bold">MVP run · Respawn overview</h2><p className="mt-1 text-xs text-muted-foreground">Upcoming MVP spawns, sorted by the shortest remaining time.</p></div>
-            <span className="rounded-full bg-secondary px-3 py-1 text-xs font-medium">{tracked.length} active timers</span>
+            <div className="flex flex-wrap items-center gap-3">
+              <label className="flex cursor-pointer items-center gap-2 rounded-lg border border-border bg-secondary/30 px-3 py-2 text-sm">
+                <input type="checkbox" checked={soundOn} onChange={(e) => void setSoundEnabled(e.target.checked)} aria-label="Enable MVP respawn alert sound" />
+                <Volume2 className="h-4 w-4 text-primary" />
+                Sound {soundOn ? "on" : "off"}
+              </label>
+              <Button size="sm" variant="outline" disabled={!tracked.length} onClick={async () => {
+                if (!userId) return;
+                if ("Notification" in window && Notification.permission === "default") {
+                  try { await Notification.requestPermission(); } catch { /* In-page alerts still work. */ }
+                }
+                if (soundOn) {
+                  try { audioRef.current ??= new AudioContext(); await audioRef.current.resume(); } catch { /* Browser audio may be unavailable. */ }
+                }
+                const next = [...new Set([...alerts, ...tracked.map((entry) => mvpSpawnId(entry))])];
+                setAlerts(next);
+                localStorage.setItem(`mvp-alerts:${userId}`, JSON.stringify(next));
+                toast.success("Respawn alerts enabled for all upcoming MVPs");
+              }}><Bell className="mr-2 h-4 w-4" />Alert me for all</Button>
+              <span className="rounded-full bg-secondary px-3 py-1 text-xs font-medium">{tracked.length} active timers</span>
+            </div>
           </div>
           {!tracked.length ? <p className="p-6 text-sm text-muted-foreground">No upcoming MVP spawns. Record a kill to start a timer.</p> :
           <div className="divide-y divide-border">
             {tracked.map((entry, i) => {
               const inWindow = entry.remaining <= 0;
-              return <button key={mvpSpawnId(entry)} onClick={() => { setSelected(mvpSpawnId(entry)); setPendingPin(null); setActiveTab("tracker"); }} className={`flex w-full items-center gap-3 px-4 py-3 text-left transition-colors hover:bg-secondary/60 md:px-6 ${selected === mvpSpawnId(entry) ? "bg-primary/5" : ""}`}>
-                <span className="w-7 shrink-0 text-center font-mono text-sm text-muted-foreground">{String(i + 1).padStart(2,"0")}</span>
-                <div className="min-w-0 flex-1"><p className="truncate font-semibold">{entry.name}</p><p className="truncate text-xs text-muted-foreground">{entry.mapName} · killed {dateTime(entry.lastKill.killed_at)}</p></div>
-                <div className="shrink-0 text-right"><p className={`font-mono text-lg font-bold tabular-nums ${inWindow ? "text-emerald-600 dark:text-emerald-400" : "text-foreground"}`}>{inWindow ? "Spawn window" : duration(entry.remaining)}</p><p className="text-[11px] text-muted-foreground">{clock(entry.earliest)} – {clock(entry.latestAt)}</p></div>
-              </button>;
+              return <div key={mvpSpawnId(entry)} className={`flex items-center gap-2 px-4 py-2 transition-colors hover:bg-secondary/60 md:px-6 ${selected === mvpSpawnId(entry) ? "bg-primary/5" : ""}`}>
+                <button type="button" onClick={() => { setSelected(mvpSpawnId(entry)); setPendingPin(null); setActiveTab("tracker"); }} className="flex min-w-0 flex-1 items-center gap-3 py-1 text-left" aria-label={`Open ${entry.name} MVP tracker`}>
+                  <span className="w-7 shrink-0 text-center font-mono text-sm text-muted-foreground">{String(i + 1).padStart(2,"0")}</span>
+                  <div className="min-w-0 flex-1"><p className="truncate font-semibold">{entry.name}</p><p className="truncate text-xs text-muted-foreground">{entry.mapName} · killed {dateTime(entry.lastKill.killed_at)}</p></div>
+                  <div className="shrink-0 text-right"><p className={`font-mono text-lg font-bold tabular-nums ${inWindow ? "text-emerald-600 dark:text-emerald-400" : "text-foreground"}`}>{inWindow ? "Spawn window" : duration(entry.remaining)}</p><p className="text-[11px] text-muted-foreground">{clock(entry.earliest)} – {clock(entry.latestAt)}</p></div>
+                </button>
+                <Button type="button" size="icon" variant={alerts.includes(mvpSpawnId(entry)) ? "secondary" : "ghost"} aria-label={alerts.includes(mvpSpawnId(entry)) ? `Disable ${entry.name} respawn alert` : `Enable ${entry.name} respawn alert`} title={alerts.includes(mvpSpawnId(entry)) ? "Alert enabled — click to turn off" : "Get a respawn alert"} onClick={() => void toggleAlert(mvpSpawnId(entry))}>
+                  {alerts.includes(mvpSpawnId(entry)) ? <Bell className="h-4 w-4 text-primary" /> : <BellOff className="h-4 w-4" />}
+                </Button>
+              </div>;
             })}
           </div>}
         </section>
-          <p className="text-xs text-muted-foreground">Only MVPs with a currently upcoming or active respawn window are shown. Times are historical estimates until verified for SoulBound.</p>
+          <p className="text-xs text-muted-foreground">Choose the bell on each MVP or select "Alert me for all". Sound is optional and shared with the MVP Tracker tab. Alerts fire while the tracker is open; browser notifications need permission. Times are historical estimates until verified for SoulBound.</p>
         </div>
       ) : (
       <div className="grid items-start gap-5 lg:grid-cols-[260px_minmax(0,1fr)] xl:grid-cols-[290px_minmax(0,1fr)]">
