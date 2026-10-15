@@ -8,6 +8,7 @@ import { Input } from "@/components/ui/input";
 import { useAuth } from "@/lib/auth";
 import { supabase } from "@/integrations/supabase/client";
 import { MVP_SPAWNS, mvpSpawnId, type MvpSpawn } from "@/lib/ro/mvp-spawns";
+import { MVP_DROPS } from "@/lib/ro/mvp-drops";
 
 export const Route = createFileRoute("/mvp-tracker")({
   head: () => ({ meta: [
@@ -102,9 +103,12 @@ function GridMap({ spawn, pin, onPlace }: { spawn: MvpSpawn; pin: Tomb | undefin
     <div onClick={click} className={`relative aspect-square w-full overflow-hidden bg-[#1e3541] ${loaded ? "cursor-crosshair" : ""}`}>
       <canvas ref={canvasRef} className={`h-full w-full object-fill [image-rendering:pixelated] ${loaded ? "" : "opacity-0"}`} />
       {!loaded && <div className="absolute inset-0 flex items-center justify-center p-6 text-center text-sm text-slate-300">{message}</div>}
-      {loaded && pin && <div className="pointer-events-none absolute -translate-x-1/2 -translate-y-full" style={{ left: `${pin.tomb_x * 100}%`, top: `${pin.tomb_y * 100}%` }}>
-        <div className="relative flex h-9 w-9 items-center justify-center rounded-full border-2 border-white bg-rose-400/90 shadow-lg shadow-rose-500/40"><MapPin className="h-5 w-5 text-white"/></div>
-      </div>}
+      {loaded && pin && <div className="pointer-events-none absolute -translate-x-1/2 -translate-y-full drop-shadow-[0_3px_3px_rgba(0,0,0,.7)]" style={{ left: `${pin.tomb_x * 100}%`, top: `${pin.tomb_y * 100}%` }}>
+        <svg width="21" height="31" viewBox="0 0 21 31" fill="none" aria-hidden="true">
+          <path d="M10.5 29.5C8.4 24.7 1.5 17.6 1.5 11.6A9 9 0 0 1 19.5 11.6C19.5 17.6 12.6 24.7 10.5 29.5Z" fill="#f43f5e" stroke="#fff" strokeWidth="1.6"/>
+          <path d="M10.5 5.4L12 8.6 15.5 9.1 13 11.6 13.7 15.1 10.5 13.4 7.3 15.1 8 11.6 5.5 9.1 9 8.6Z" fill="#fff"/>
+        </svg>
+      </div>
     </div>
     <div className="flex items-center gap-2 border-t border-white/10 px-4 py-3 text-xs text-slate-300">
       <MapPin className="h-4 w-4 text-rose-300"/>
@@ -222,6 +226,17 @@ function MvpTracker() {
   const minSpawn = kill ? new Date(kill.killed_at).getTime() + spawn.minMinutes * 60_000 : null;
   const maxSpawn = kill ? new Date(kill.killed_at).getTime() + spawn.maxMinutes * 60_000 : null;
   const current = status(spawn, kill, now);
+  const drops = MVP_DROPS[spawn.bossKey] ?? [];
+  const tracked = MVP_SPAWNS.flatMap((entry) => {
+    const latest = data?.kills.find((k) => k.boss_key === entry.bossKey && k.map_key === entry.mapKey);
+    if (!latest) return [];
+    const earliest = new Date(latest.killed_at).getTime() + entry.minMinutes * 60_000;
+    const latestAt = new Date(latest.killed_at).getTime() + entry.maxMinutes * 60_000;
+    // Remove expired reports after the full estimated respawn window has elapsed.
+    if (now > latestAt) return [];
+    return [{ ...entry, lastKill: latest, earliest, latestAt, remaining: earliest - now }];
+  }).sort((a,b) => a.earliest - b.earliest);
+
   const refresh = () => qc.invalidateQueries({ queryKey: ["mvp-tracker"] });
 
   async function report(when: Date) {
@@ -327,6 +342,30 @@ function MvpTracker() {
             </div>
           </div>
         </div>
+        <section className="rounded-xl border border-border bg-card p-5 md:p-6">
+          <div className="mb-4 flex items-center justify-between gap-2"><div><h2 className="text-lg font-bold">{spawn.name} drops</h2><p className="mt-1 text-xs text-muted-foreground">Reference rates from the pre-renewal item database; SoulBound rates may differ.</p></div><span className="text-xs text-muted-foreground">{drops.length} items</span></div>
+          {drops.length ? <div className="grid gap-2 sm:grid-cols-2">{drops.map((drop) => <div key={`${drop.id}-${drop.kind}`} className="flex items-center justify-between gap-3 rounded-lg border border-border bg-secondary/20 px-3 py-3">
+            <div className="min-w-0"><p className="truncate text-sm font-semibold">{drop.name}{drop.slots ? ` [${drop.slots}]` : ""}</p><p className="text-[11px] text-muted-foreground">{drop.kind === "mvp" ? "MVP reward" : "Monster drop"}</p></div>
+            <span className="shrink-0 rounded-md bg-primary/10 px-2.5 py-1 font-mono text-sm font-semibold tabular-nums text-primary">{drop.rate.toFixed(2)}%</span>
+          </div>)}</div> : <p className="text-sm text-muted-foreground">No drop entries for this MVP in the existing item database. Rates have not been invented.</p>}
+        </section>
+        <section className="overflow-hidden rounded-xl border border-border bg-card">
+          <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border p-5 md:px-6">
+            <div><h2 className="font-display text-xl font-bold">MVP run · Respawn overview</h2><p className="mt-1 text-xs text-muted-foreground">All tracked kills, ordered by earliest respawn. Updates automatically.</p></div>
+            <span className="rounded-full bg-secondary px-3 py-1 text-xs font-medium">{tracked.length} active timers</span>
+          </div>
+          {!tracked.length ? <p className="p-6 text-sm text-muted-foreground">No active MVP timers yet. Record a kill to start planning your run.</p> :
+          <div className="divide-y divide-border">
+            {tracked.map((entry, i) => {
+              const inWindow = entry.remaining <= 0;
+              return <button key={mvpSpawnId(entry)} onClick={() => { setSelected(mvpSpawnId(entry)); setPendingPin(null); }} className={`flex w-full items-center gap-3 px-4 py-3 text-left transition-colors hover:bg-secondary/60 md:px-6 ${selected === mvpSpawnId(entry) ? "bg-primary/5" : ""}`}>
+                <span className="w-7 shrink-0 text-center font-mono text-sm text-muted-foreground">{String(i + 1).padStart(2,"0")}</span>
+                <div className="min-w-0 flex-1"><p className="truncate font-semibold">{entry.name}</p><p className="truncate text-xs text-muted-foreground">{entry.mapName} · killed {dateTime(entry.lastKill.killed_at)}</p></div>
+                <div className="shrink-0 text-right"><p className={`font-mono text-lg font-bold tabular-nums ${inWindow ? "text-emerald-600 dark:text-emerald-400" : "text-foreground"}`}>{inWindow ? "Spawn window" : duration(entry.remaining)}</p><p className="text-[11px] text-muted-foreground">{clock(entry.earliest)} – {clock(entry.latestAt)}</p></div>
+              </button>;
+            })}
+          </div>}
+        </section>
         <section className="rounded-xl border border-border bg-card p-5 md:p-6">
           <div className="mb-4 flex items-center justify-between gap-2"><div><h3 className="text-lg font-bold">Kill history</h3><p className="text-xs text-muted-foreground">Last reports for this MVP and map</p></div><Crosshair className="h-5 w-5 text-muted-foreground"/></div>
           {!recent.length ? <p className="rounded-lg bg-secondary/30 p-4 text-sm text-muted-foreground">No kills reported yet. Be the first to track this MVP.</p> :
