@@ -16,10 +16,10 @@ CREATE POLICY "Party members can read specializations"
 ON public.party_specializations FOR SELECT TO authenticated USING (true);
 DROP POLICY IF EXISTS "Members can choose their party specialization" ON public.party_specializations;
 CREATE POLICY "Members can choose their party specialization"
-ON public.party_specializations AS spec FOR INSERT TO authenticated
+ON public.party_specializations FOR INSERT TO authenticated
 WITH CHECK (user_id = auth.uid() AND
- (EXISTS (SELECT 1 FROM public.party_slots s WHERE s.party_id=spec.party_id AND s.user_id=auth.uid())
-  OR EXISTS (SELECT 1 FROM public.party_waitlist w WHERE w.party_id=spec.party_id AND w.user_id=auth.uid())));
+ (EXISTS (SELECT 1 FROM public.party_slots s WHERE s.party_id=public.party_specializations.party_id AND s.user_id=auth.uid())
+  OR EXISTS (SELECT 1 FROM public.party_waitlist w WHERE w.party_id=public.party_specializations.party_id AND w.user_id=auth.uid())));
 DROP POLICY IF EXISTS "Members can update their party specialization" ON public.party_specializations;
 CREATE POLICY "Members can update their party specialization"
 ON public.party_specializations FOR UPDATE TO authenticated
