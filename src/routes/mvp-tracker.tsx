@@ -122,6 +122,7 @@ function MvpTracker() {
   const { userId } = useAuth();
   const qc = useQueryClient();
   const [search, setSearch] = useState("");
+  const [activeTab, setActiveTab] = useState<"tracker" | "overview">("tracker");
   const [selected, setSelected] = useState(mvpSpawnId(MVP_SPAWNS[0]!));
   const [minutesAgo, setMinutesAgo] = useState("35");
   const [alerts, setAlerts] = useState<string[]>([]);
@@ -281,7 +282,34 @@ function MvpTracker() {
       <span className="rounded-full border border-border bg-card px-4 py-2 text-sm text-muted-foreground">{MVP_SPAWNS.length} map spawns · {new Set(MVP_SPAWNS.map((s) => s.bossKey)).size} MVPs</span>
     </div>
     {!userId ? <div className="rounded-xl border border-border bg-card p-8 text-center"><h2 className="text-xl font-semibold">Guild members only</h2><p className="my-3 text-muted-foreground">Sign in to see shared MVP timers and report kills.</p><Button asChild><Link to="/auth">Sign in</Link></Button></div> :
-    <div className="grid items-start gap-5 lg:grid-cols-[260px_minmax(0,1fr)] xl:grid-cols-[290px_minmax(0,1fr)]">
+    <div>
+      <div role="tablist" aria-label="MVP tracker views" className="mb-6 flex w-fit gap-1 rounded-xl border border-border bg-secondary/50 p-1">
+        <button role="tab" type="button" aria-selected={activeTab === "tracker"} onClick={() => setActiveTab("tracker")} className={`rounded-lg px-5 py-2.5 text-sm font-semibold transition ${activeTab === "tracker" ? "bg-card text-primary shadow-sm" : "text-muted-foreground hover:text-foreground"}`}>MVP Tracker</button>
+        <button role="tab" type="button" aria-selected={activeTab === "overview"} onClick={() => setActiveTab("overview")} className={`rounded-lg px-5 py-2.5 text-sm font-semibold transition ${activeTab === "overview" ? "bg-card text-primary shadow-sm" : "text-muted-foreground hover:text-foreground"}`}>Respawn Overview <span className="ml-1 rounded-full bg-background/70 px-1.5 py-0.5 text-xs">{tracked.length}</span></button>
+      </div>
+      {activeTab === "overview" ? (
+        <div className="space-y-4">
+          <section className="overflow-hidden rounded-xl border border-border bg-card">
+          <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border p-5 md:px-6">
+            <div><h2 className="font-display text-xl font-bold">MVP run · Respawn overview</h2><p className="mt-1 text-xs text-muted-foreground">Upcoming MVP spawns, sorted by the shortest remaining time.</p></div>
+            <span className="rounded-full bg-secondary px-3 py-1 text-xs font-medium">{tracked.length} active timers</span>
+          </div>
+          {!tracked.length ? <p className="p-6 text-sm text-muted-foreground">No upcoming MVP spawns. Record a kill to start a timer.</p> :
+          <div className="divide-y divide-border">
+            {tracked.map((entry, i) => {
+              const inWindow = entry.remaining <= 0;
+              return <button key={mvpSpawnId(entry)} onClick={() => { setSelected(mvpSpawnId(entry)); setPendingPin(null); setActiveTab("tracker"); }} className={`flex w-full items-center gap-3 px-4 py-3 text-left transition-colors hover:bg-secondary/60 md:px-6 ${selected === mvpSpawnId(entry) ? "bg-primary/5" : ""}`}>
+                <span className="w-7 shrink-0 text-center font-mono text-sm text-muted-foreground">{String(i + 1).padStart(2,"0")}</span>
+                <div className="min-w-0 flex-1"><p className="truncate font-semibold">{entry.name}</p><p className="truncate text-xs text-muted-foreground">{entry.mapName} · killed {dateTime(entry.lastKill.killed_at)}</p></div>
+                <div className="shrink-0 text-right"><p className={`font-mono text-lg font-bold tabular-nums ${inWindow ? "text-emerald-600 dark:text-emerald-400" : "text-foreground"}`}>{inWindow ? "Spawn window" : duration(entry.remaining)}</p><p className="text-[11px] text-muted-foreground">{clock(entry.earliest)} – {clock(entry.latestAt)}</p></div>
+              </button>;
+            })}
+          </div>}
+        </section>
+          <p className="text-xs text-muted-foreground">Only MVPs with a currently upcoming or active respawn window are shown. Times are historical estimates until verified for SoulBound.</p>
+        </div>
+      ) : (
+      <div className="grid items-start gap-5 lg:grid-cols-[260px_minmax(0,1fr)] xl:grid-cols-[290px_minmax(0,1fr)]">
       <aside className="overflow-hidden rounded-xl border border-border bg-card lg:sticky lg:top-24">
         <div className="border-b border-border p-4">
           <h2 className="font-semibold">Choose an MVP</h2>
@@ -349,23 +377,6 @@ function MvpTracker() {
             <span className="shrink-0 rounded-md bg-primary/10 px-2.5 py-1 font-mono text-sm font-semibold tabular-nums text-primary">{drop.rate.toFixed(2)}%</span>
           </div>)}</div> : <p className="text-sm text-muted-foreground">No drop entries for this MVP in the existing item database. Rates have not been invented.</p>}
         </section>
-        <section className="overflow-hidden rounded-xl border border-border bg-card">
-          <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border p-5 md:px-6">
-            <div><h2 className="font-display text-xl font-bold">MVP run · Respawn overview</h2><p className="mt-1 text-xs text-muted-foreground">All tracked kills, ordered by earliest respawn. Updates automatically.</p></div>
-            <span className="rounded-full bg-secondary px-3 py-1 text-xs font-medium">{tracked.length} active timers</span>
-          </div>
-          {!tracked.length ? <p className="p-6 text-sm text-muted-foreground">No active MVP timers yet. Record a kill to start planning your run.</p> :
-          <div className="divide-y divide-border">
-            {tracked.map((entry, i) => {
-              const inWindow = entry.remaining <= 0;
-              return <button key={mvpSpawnId(entry)} onClick={() => { setSelected(mvpSpawnId(entry)); setPendingPin(null); }} className={`flex w-full items-center gap-3 px-4 py-3 text-left transition-colors hover:bg-secondary/60 md:px-6 ${selected === mvpSpawnId(entry) ? "bg-primary/5" : ""}`}>
-                <span className="w-7 shrink-0 text-center font-mono text-sm text-muted-foreground">{String(i + 1).padStart(2,"0")}</span>
-                <div className="min-w-0 flex-1"><p className="truncate font-semibold">{entry.name}</p><p className="truncate text-xs text-muted-foreground">{entry.mapName} · killed {dateTime(entry.lastKill.killed_at)}</p></div>
-                <div className="shrink-0 text-right"><p className={`font-mono text-lg font-bold tabular-nums ${inWindow ? "text-emerald-600 dark:text-emerald-400" : "text-foreground"}`}>{inWindow ? "Spawn window" : duration(entry.remaining)}</p><p className="text-[11px] text-muted-foreground">{clock(entry.earliest)} – {clock(entry.latestAt)}</p></div>
-              </button>;
-            })}
-          </div>}
-        </section>
         <section className="rounded-xl border border-border bg-card p-5 md:p-6">
           <div className="mb-4 flex items-center justify-between gap-2"><div><h3 className="text-lg font-bold">Kill history</h3><p className="text-xs text-muted-foreground">Last reports for this MVP and map</p></div><Crosshair className="h-5 w-5 text-muted-foreground"/></div>
           {!recent.length ? <p className="rounded-lg bg-secondary/30 p-4 text-sm text-muted-foreground">No kills reported yet. Be the first to track this MVP.</p> :
@@ -373,6 +384,7 @@ function MvpTracker() {
         </section>
         <p className="text-xs leading-relaxed text-muted-foreground">MVP spawn locations and reference timers are historical Episode 8.2 estimates, not yet validated against SoulBound's server configuration. GAT maps load directly from your extracted Ragnarokmap repository; unavailable maps cannot be pinned.</p>
       </div>
+      )}
     </div>}
   </main>;
 }
