@@ -8,6 +8,7 @@ import crest from "@/assets/guild-blue-bird.png.asset.json";
 
 const NAV = [
   { to: "/parties", label: "Party Planner" },
+  { to: "/mvp-tracker", label: "MVP Tracker" },
   { to: "/members", label: "Members" },
   { to: "/wishlists", label: "Wishlists" },
   { to: "/market", label: "Marketplace" },
