@@ -2,6 +2,8 @@ import { GuildBadge, useGuildBadges } from "@/components/GuildBadge";
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
+import { partySpecializationsFor } from "@/lib/ro/party-specializations";
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/lib/auth";
@@ -65,6 +67,10 @@ function PartyPage() {
   });
   const [joining, setJoining] = useState(false);
   const [subRole, setSubRole] = useState("Any");
+  const [signupChoice, setSignupChoice] = useState<{ slotId: string | null; role: string } | null>(null);
+  const [specialization, setSpecialization] = useState("");
+  const specs = useQuery({ queryKey: ["party-specializations", id], queryFn: async () => { const { data, error } = await supabase.from("party_specializations").select("party_id,user_id,role,specialization").eq("party_id", id); if(error) throw error; return data ?? []; }, enabled: !!userId });
+  const mySpec = specs.data?.find((spec) => spec.user_id === userId);
   const readiness = useQuery({
     queryKey: ["party-readiness", id],
     queryFn: async () => {
@@ -100,7 +106,13 @@ function PartyPage() {
   const reserve = (waitlist.data ?? []).find((w) => w.user_id === userId);
   const refresh = () => qc.invalidateQueries({ queryKey: key });
 
-  async function join(slotId: string | null, desiredRole = "Any") {
+  function requestJoin(slotId: string | null, role: string) {
+    const options = partySpecializationsFor(role);
+    if (!options.length) { void join(slotId, role, ""); return; }
+    setSignupChoice({ slotId, role });
+    setSpecialization(options.length === 1 ? options[0] : "");
+  }
+  async function join(slotId: string | null, desiredRole = "Any", chosenSpecialization = "") {
     if (!userId || joining) return;
     setJoining(true);
     const { data, error } = await supabase.rpc("party_signup_role", {
@@ -151,9 +163,10 @@ function PartyPage() {
               <select id="substitute-role" className="rounded-md border border-input bg-background px-3 py-2 text-sm" value={subRole} onChange={(e) => setSubRole(e.target.value)}>
                 {["Any", ...new Set(slots.map((s) => s.role).filter((r) => r !== "Any"))].map((role) => <option value={role} key={role}>{role === "Any" ? "Any role" : jobName(role)}</option>)}
               </select>
-              <Button variant="outline" disabled={joining} onClick={() => join(null, subRole)}>Join substitutes</Button>
+              <Button variant="outline" disabled={joining} onClick={() => requestJoin(null, subRole)}>Join substitutes</Button>
             </div>}
       </div> : <Button asChild size="sm" variant="outline" className="mt-4"><Link to="/auth">Sign in to join</Link></Button>}
+      {mySpec && (mine || reserve) && <p className="mt-3 rounded-lg border border-primary/20 bg-primary/5 p-3 text-sm">Your specialization: <strong>{mySpec.specialization}</strong></p>}
       {mine && <section className="mt-4 rounded-xl border border-border bg-card p-4">
         <h2 className="mb-3 font-semibold">My party readiness</h2>
         <div className="flex flex-wrap gap-5 text-sm">
@@ -172,9 +185,10 @@ function PartyPage() {
                   {s.char_name || s.profiles?.display_name} <GuildBadge role={badges.data?.[s.user_id ?? ""]} /> {readiness.data?.find((r) => r.user_id === s.user_id)?.ready && <span title="Member ready" className="text-xs text-emerald-500">✓ Ready</span>} {readiness.data?.find((r) => r.user_id === s.user_id)?.supplies_ready && <span title="Supplies ready" className="text-xs text-emerald-500">✓ Supplies</span>} <span className="text-sm text-primary">{s.job && jobName(s.job)}</span>
                 </Link>
               ) : <div className="text-sm text-muted-foreground">Open slot</div>}
+              {s.user_id && specs.data?.find((spec) => spec.user_id === s.user_id)?.specialization && <div className="mt-1 text-xs font-medium text-primary">{specs.data.find((spec) => spec.user_id === s.user_id)?.specialization}</div>}
             </div>
 
-            {!s.user_id && !!userId && !mine && !reserve && <Button size="sm" disabled={joining} onClick={() => join(s.id, s.role)}>Join this role</Button>}
+            {!s.user_id && !!userId && !mine && !reserve && <Button size="sm" disabled={joining} onClick={() => requestJoin(s.id, s.role)}>Join this role</Button>}
             {s.user_id && (s.user_id === userId || isCreator) && <Button size="sm" variant="ghost" onClick={() => leave(s.user_id!)}>{s.user_id === userId ? "Leave" : "Remove"}</Button>}
             {isCreator && !s.user_id && <Button size="sm" variant="ghost" onClick={async () => { await supabase.from("party_slots").delete().eq("id", s.id); refresh(); }}>✕</Button>}
           </div>
@@ -185,10 +199,20 @@ function PartyPage() {
         <p className="mt-1 text-sm text-muted-foreground">Substitutes who selected a matching role get priority; otherwise the earliest available substitute is promoted. No profile-class restrictions.</p>
         {(waitlist.data ?? []).length === 0 ? <p className="mt-4 text-sm text-muted-foreground">No substitutes yet.</p> :
           <ol className="mt-4 space-y-2">{(waitlist.data ?? []).map((w,i)=><li key={w.id} className="flex items-center gap-3 rounded-lg bg-secondary/40 px-3 py-2 text-sm">
-            <span className="text-muted-foreground">{i+1}.</span><span className="flex-1 font-medium">{w.char_name || w.profiles?.display_name} <GuildBadge role={badges.data?.[w.user_id]} /> <span className="font-normal text-muted-foreground">· Preferred: {jobName(w.job)}</span></span>
+            <span className="text-muted-foreground">{i+1}.</span><span className="flex-1 font-medium">{w.char_name || w.profiles?.display_name} <GuildBadge role={badges.data?.[w.user_id]} /> <span className="font-normal text-muted-foreground">· Preferred: {jobName(w.job)}{specs.data?.find((spec) => spec.user_id === w.user_id)?.specialization ? ` · ${specs.data.find((spec) => spec.user_id === w.user_id)?.specialization}` : ""}</span></span>
             {(isCreator || w.user_id===userId) && <Button size="sm" variant="ghost" onClick={()=>leave(w.user_id)}>Remove</Button>}
           </li>)}</ol>}
       </section>
+      <Dialog open={!!signupChoice} onOpenChange={(open) => { if (!open && !joining) setSignupChoice(null); }}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader><DialogTitle>Join as {signupChoice?.role}</DialogTitle><DialogDescription>Choose the specialization you can bring to this party.</DialogDescription></DialogHeader>
+          <div className="grid gap-2 py-2">
+            {partySpecializationsFor(signupChoice?.role ?? "").map((option) => <button type="button" key={option} onClick={() => setSpecialization(option)} aria-pressed={specialization === option} className={`rounded-lg border px-4 py-3 text-left text-sm transition ${specialization === option ? "border-primary bg-primary/10 font-semibold text-primary" : "border-border hover:bg-secondary"}`}>{option}</button>)}
+            <button type="button" onClick={() => setSpecialization("")} className={`rounded-lg border px-4 py-2 text-left text-sm ${!specialization ? "border-primary bg-primary/10" : "border-border text-muted-foreground"}`}>Not specified</button>
+          </div>
+          <Button disabled={joining || !signupChoice} onClick={() => signupChoice && void join(signupChoice.slotId, signupChoice.role, specialization)}>{joining ? "Joining…" : "Confirm signup"}</Button>
+        </DialogContent>
+      </Dialog>
       {isCreator && (
         <div className="mt-6 flex flex-wrap gap-2">
           <Button variant="outline" disabled={!canAddSlot(slots.length)} onClick={addSlot}>{canAddSlot(slots.length) ? "Add open slot" : `Full (${MAX_PARTY_SIZE} max)`}</Button>
