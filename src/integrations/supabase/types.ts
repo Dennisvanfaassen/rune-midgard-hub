@@ -14,6 +14,12 @@ export type Database = {
   }
   public: {
     Tables: {
+      party_specializations: {
+        Row: { party_id: string; user_id: string; role: string; specialization: string; updated_at: string }
+        Insert: { party_id: string; user_id: string; role: string; specialization: string; updated_at?: string }
+        Update: { party_id?: string; user_id?: string; role?: string; specialization?: string; updated_at?: string }
+        Relationships: []
+      }
       forum_posts: {
         Row: {
           author_id: string
