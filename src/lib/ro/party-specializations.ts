@@ -8,6 +8,6 @@ export const PARTY_SPECIALIZATIONS: Record<string, readonly string[]> = {
   Greed: ["Greed", "Greed + supply cart"],
   SP: ["SP song", "Potion pitcher", "SP song & Kim"],
   Wizard: ["Storm gust", "Storm gust + Quagmire", "Storm gust + LoV", "Stormgust, LoV + Quagmire"],
-  Priest: ["Got warp to destination", "No warp to destination"],
+  Priest: ["Got warp to destination"],
 };
 export const partySpecializationsFor = (role: string): readonly string[] => PARTY_SPECIALIZATIONS[role] ?? [];
