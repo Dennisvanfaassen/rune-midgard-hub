@@ -14,18 +14,6 @@ export type Database = {
   }
   public: {
     Tables: {
-      party_attendance: {
-        Row: { party_id: string; user_id: string; status: string; late_minutes: number | null; message: string; updated_at: string }
-        Insert: { party_id: string; user_id: string; status?: string; late_minutes?: number | null; message?: string; updated_at?: string }
-        Update: { party_id?: string; user_id?: string; status?: string; late_minutes?: number | null; message?: string; updated_at?: string }
-        Relationships: []
-      }
-      party_specializations: {
-        Row: { party_id: string; user_id: string; role: string; specialization: string; updated_at: string }
-        Insert: { party_id: string; user_id: string; role: string; specialization: string; updated_at?: string }
-        Update: { party_id?: string; user_id?: string; role?: string; specialization?: string; updated_at?: string }
-        Relationships: []
-      }
       forum_posts: {
         Row: {
           author_id: string
@@ -409,6 +397,41 @@ export type Database = {
           },
         ]
       }
+      party_attendance: {
+        Row: {
+          late_minutes: number | null
+          message: string
+          party_id: string
+          status: string
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          late_minutes?: number | null
+          message?: string
+          party_id: string
+          status?: string
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          late_minutes?: number | null
+          message?: string
+          party_id?: string
+          status?: string
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "party_attendance_party_id_fkey"
+            columns: ["party_id"]
+            isOneToOne: false
+            referencedRelation: "parties"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       party_readiness: {
         Row: {
           party_id: string
@@ -489,6 +512,38 @@ export type Database = {
             columns: ["user_id"]
             isOneToOne: false
             referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      party_specializations: {
+        Row: {
+          party_id: string
+          role: string
+          specialization: string
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          party_id: string
+          role: string
+          specialization: string
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          party_id?: string
+          role?: string
+          specialization?: string
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "party_specializations_party_id_fkey"
+            columns: ["party_id"]
+            isOneToOne: false
+            referencedRelation: "parties"
             referencedColumns: ["id"]
           },
         ]
