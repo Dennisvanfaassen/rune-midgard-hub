@@ -4,6 +4,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
 import { jobName, partyCutoff, formatPartyTime, partyCountdown } from "@/lib/ro/jobs";
 import { WishlistBoard } from "@/components/WishlistBoard";
+import { GuildAchievements } from "@/components/GuildAchievements";
 import { CharacterPortrait } from "@/components/CharacterPortrait";
 import { ListingCard, useListings } from "@/components/MarketListing";
 import logo from "@/assets/guild-blue-bird.png.asset.json";
@@ -52,7 +53,8 @@ function Home() {
         </div>
       </section>
 
-      <section className="mx-auto grid max-w-6xl gap-8 px-4 md:grid-cols-2">
+      <GuildAchievements />
+      <section className="mx-auto mt-10 grid max-w-6xl gap-8 px-4 md:grid-cols-2">
         <div>
           <div className="mb-3 flex items-center justify-between"><h2 className="text-2xl font-bold">Upcoming parties</h2><Link to="/parties" className="text-sm text-primary">All parties</Link></div>
           <div className="space-y-2">
