@@ -148,7 +148,7 @@ function PartyPage() {
     const options = partySpecializationsFor(role);
     if (!options.length) { void join(slotId, role, ""); return; }
     setSignupChoice({ slotId, role });
-    setSpecialization(options.length === 1 ? options[0] : "");
+    setSpecialization(options.length === 1 ? (options[0] ?? "") : "");
   }
   async function join(slotId: string | null, desiredRole = "Any", chosenSpecialization = "") {
     if (!userId || joining) return;
