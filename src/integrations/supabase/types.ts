@@ -14,6 +14,12 @@ export type Database = {
   }
   public: {
     Tables: {
+      party_attendance: {
+        Row: { party_id: string; user_id: string; status: string; late_minutes: number | null; message: string; updated_at: string }
+        Insert: { party_id: string; user_id: string; status?: string; late_minutes?: number | null; message?: string; updated_at?: string }
+        Update: { party_id?: string; user_id?: string; status?: string; late_minutes?: number | null; message?: string; updated_at?: string }
+        Relationships: []
+      }
       party_specializations: {
         Row: { party_id: string; user_id: string; role: string; specialization: string; updated_at: string }
         Insert: { party_id: string; user_id: string; role: string; specialization: string; updated_at?: string }
