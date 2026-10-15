@@ -4,6 +4,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 import { partySpecializationsFor } from "@/lib/ro/party-specializations";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
 import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/lib/auth";
@@ -71,6 +72,26 @@ function PartyPage() {
   const [specialization, setSpecialization] = useState("");
   const specs = useQuery({ queryKey: ["party-specializations", id], queryFn: async () => { const { data, error } = await supabase.from("party_specializations").select("party_id,user_id,role,specialization").eq("party_id", id); if(error) throw error; return data ?? []; }, enabled: !!userId });
   const mySpec = specs.data?.find((spec) => spec.user_id === userId);
+  const [availabilityOpen, setAvailabilityOpen] = useState(false);
+  const [availabilityStatus, setAvailabilityStatus] = useState("confirmed");
+  const [lateMinutes, setLateMinutes] = useState("15");
+  const [availabilityMessage, setAvailabilityMessage] = useState("");
+  const [availabilityBusy, setAvailabilityBusy] = useState(false);
+  const attendance = useQuery({
+    queryKey: ["party-attendance", id], enabled: !!userId, refetchInterval: 30_000,
+    queryFn: async () => {
+      const { data, error } = await supabase.from("party_attendance").select("*").eq("party_id", id);
+      if (error) throw error;
+      return data ?? [];
+    },
+  });
+  const myAttendance = attendance.data?.find((item) => item.user_id === userId);
+  function openAvailability() {
+    setAvailabilityStatus(myAttendance?.status ?? "confirmed");
+    setLateMinutes(String(myAttendance?.late_minutes ?? 15));
+    setAvailabilityMessage(myAttendance?.message ?? "");
+    setAvailabilityOpen(true);
+  }
   const readiness = useQuery({
     queryKey: ["party-readiness", id],
     queryFn: async () => {
@@ -105,6 +126,23 @@ function PartyPage() {
   const mine = slots.find((s) => s.user_id === userId);
   const reserve = (waitlist.data ?? []).find((w) => w.user_id === userId);
   const refresh = () => qc.invalidateQueries({ queryKey: key });
+  const attendeeIds = slots.map((slot) => slot.user_id).filter((value): value is string => !!value);
+  const attendanceOf = (memberId: string) => attendance.data?.find((item) => item.user_id === memberId);
+  const availabilityText = (item: { status: string; late_minutes: number | null } | undefined) => {
+    if (!item) return "Unconfirmed";
+    if (item.status === "early") return "Online & ready";
+    if (item.status === "late") return `${item.late_minutes ?? "?"}m late`;
+    if (item.status === "maybe_late") return `Might be ${item.late_minutes ?? "?"}m late`;
+    if (item.status === "uncertain") return "Might not make it";
+    if (item.status === "cancelled") return "Can't make it";
+    return "Confirmed";
+  };
+  const attendanceCounts = {
+    confirmed: attendeeIds.filter((uid) => ["confirmed", "early"].includes(attendanceOf(uid)?.status ?? "")).length,
+    late: attendeeIds.filter((uid) => ["late", "maybe_late"].includes(attendanceOf(uid)?.status ?? "")).length,
+    uncertain: attendeeIds.filter((uid) => attendanceOf(uid)?.status === "uncertain").length,
+    unconfirmed: attendeeIds.filter((uid) => !attendanceOf(uid)).length,
+  };
 
   function requestJoin(slotId: string | null, role: string) {
     const options = partySpecializationsFor(role);
@@ -140,6 +178,37 @@ function PartyPage() {
     const {error}=await supabase.rpc("party_leave",{_party:id, ...(memberId ? { _member: memberId } : {})});
     if(error) toast.error(error.message); else toast.success(memberId && memberId!==userId ? "Member removed" : "You left the party");
     await Promise.all([refresh(),qc.invalidateQueries({queryKey:["party-waitlist",id]})]);
+  }
+  async function saveAvailability() {
+    if (!userId || availabilityBusy || (!mine && !reserve)) return;
+    const isLate = availabilityStatus === "late" || availabilityStatus === "maybe_late";
+    const minutes = Number(lateMinutes);
+    if (isLate && (!Number.isInteger(minutes) || minutes < 1 || minutes > 1440)) { toast.error("Enter a number of minutes between 1 and 1440"); return; }
+    if (availabilityStatus === "cancelled" && !window.confirm("Can't make it? This releases your slot and may promote a substitute. Continue?")) return;
+    setAvailabilityBusy(true);
+    const { error } = await supabase.from("party_attendance").upsert({
+      party_id: id, user_id: userId, status: availabilityStatus,
+      late_minutes: isLate ? minutes : null,
+      message: availabilityMessage.trim().slice(0, 300),
+      updated_at: new Date().toISOString(),
+    }, { onConflict: "party_id,user_id" });
+    if (error) { toast.error(error.message); setAvailabilityBusy(false); return; }
+    if (availabilityStatus === "cancelled") {
+      const result = await supabase.rpc("party_leave", { _party: id });
+      if (result.error) {
+        toast.error("Cancellation saved but your slot could not be released: " + result.error.message);
+      } else {
+        toast.success("Cancelled your attendance; substitutes can take your place.");
+        await Promise.all([
+          qc.invalidateQueries({ queryKey: ["party-waitlist", id] }),
+          qc.invalidateQueries({ queryKey: ["party-specializations", id] }),
+        ]);
+      }
+      refresh();
+    } else toast.success("Availability updated");
+    await qc.invalidateQueries({ queryKey: ["party-attendance", id] });
+    setAvailabilityOpen(false);
+    setAvailabilityBusy(false);
   }
   async function addSlot() {
     if (!canAddSlot(slots.length)) return;
@@ -177,6 +246,10 @@ function PartyPage() {
               <Button variant="outline" disabled={joining} onClick={() => requestJoin(null, subRole)}>Join substitutes</Button>
             </div>}
       </div> : <Button asChild size="sm" variant="outline" className="mt-4"><Link to="/auth">Sign in to join</Link></Button>}
+      {(mine || reserve) && <div className="mt-4 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-border bg-card p-4">
+        <div><div className="text-sm font-semibold">My attendance: <span className="text-primary">{availabilityText(myAttendance)}</span></div><p className="text-xs text-muted-foreground">Let your organizer know if you're late or unable to attend.</p></div>
+        <Button variant="outline" size="sm" onClick={openAvailability}>Update availability</Button>
+      </div>}
       {mySpec && (mine || reserve) && <p className="mt-3 rounded-lg border border-primary/20 bg-primary/5 p-3 text-sm">Your specialization: <strong>{mySpec.specialization}</strong></p>}
       {mine && <section className="mt-4 rounded-xl border border-border bg-card p-4">
         <h2 className="mb-3 font-semibold">My party readiness</h2>
@@ -186,6 +259,20 @@ function PartyPage() {
         </div>
         {readiness.isError && <p className="mt-2 text-xs text-destructive">Readiness requires the latest Supabase SQL migration.</p>}
       </section>}
+      <section className="mt-5 rounded-xl border border-border bg-card p-4">
+        <h3 className="font-semibold">Attendance overview</h3>
+        <div className="mt-3 flex flex-wrap gap-2 text-xs">
+          <span className="rounded-full bg-emerald-500/10 px-3 py-1.5 text-emerald-600">{attendanceCounts.confirmed} confirmed / ready</span>
+          <span className="rounded-full bg-amber-500/10 px-3 py-1.5 text-amber-600">{attendanceCounts.late} late or possibly late</span>
+          <span className="rounded-full bg-orange-500/10 px-3 py-1.5 text-orange-600">{attendanceCounts.uncertain} uncertain</span>
+          <span className="rounded-full bg-secondary px-3 py-1.5 text-muted-foreground">{attendanceCounts.unconfirmed} unconfirmed</span>
+        </div>
+        {attendance.isError && <p className="mt-2 text-sm text-destructive">Attendance data requires migration 0013 in Lovable Cloud.</p>}
+        {isCreator && (attendance.data ?? []).filter((item) => item.status !== "confirmed" && item.status !== "early").length > 0 && <div className="mt-4 space-y-2 border-t border-border pt-3">
+          <p className="text-xs font-semibold text-muted-foreground">Recent attendance changes</p>
+          {(attendance.data ?? []).filter((item) => item.status !== "confirmed" && item.status !== "early").sort((a,b) => b.updated_at.localeCompare(a.updated_at)).slice(0, 8).map((item) => <p key={item.user_id} className="text-xs"><span className="font-medium">{slots.find((slot) => slot.user_id === item.user_id)?.profiles?.display_name ?? (waitlist.data ?? []).find((w) => w.user_id === item.user_id)?.profiles?.display_name ?? "Former member"}</span> · {availabilityText(item)} {item.message && <span className="text-muted-foreground">— {item.message}</span>}</p>)}
+        </div>}
+      </section>
       <div className="mt-4 grid gap-2 sm:grid-cols-2">
         {slots.map((s) => (
           <div key={s.id} className={"flex items-center gap-3 rounded-lg border p-3 " + (s.user_id ? "border-primary/40 bg-card" : "border-dashed border-border")}>
@@ -196,6 +283,7 @@ function PartyPage() {
                   {s.char_name || s.profiles?.display_name} <GuildBadge role={badges.data?.[s.user_id ?? ""]} /> {readiness.data?.find((r) => r.user_id === s.user_id)?.ready && <span title="Member ready" className="text-xs text-emerald-500">✓ Ready</span>} {readiness.data?.find((r) => r.user_id === s.user_id)?.supplies_ready && <span title="Supplies ready" className="text-xs text-emerald-500">✓ Supplies</span>} <span className="text-sm text-primary">{s.job && jobName(s.job)}</span>
                 </Link>
               ) : <div className="text-sm text-muted-foreground">Open slot</div>}
+              {s.user_id && <div className="mt-1 text-xs text-muted-foreground">{availabilityText(attendanceOf(s.user_id))}{attendanceOf(s.user_id)?.message ? ` · ${attendanceOf(s.user_id)?.message}` : ""}</div>}
               {s.user_id && specs.data?.find((spec) => spec.user_id === s.user_id)?.specialization && <div className="mt-1 text-xs font-medium text-primary">{specs.data?.find((spec) => spec.user_id === s.user_id)?.specialization}</div>}
             </div>
 
@@ -214,6 +302,34 @@ function PartyPage() {
             {(isCreator || w.user_id===userId) && <Button size="sm" variant="ghost" onClick={()=>leave(w.user_id)}>Remove</Button>}
           </li>)}</ol>}
       </section>
+      <Dialog open={availabilityOpen} onOpenChange={(open) => { if (!availabilityBusy) setAvailabilityOpen(open); }}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader><DialogTitle>Update availability</DialogTitle><DialogDescription>Keep your party organizer informed before the run.</DialogDescription></DialogHeader>
+          <div className="space-y-3">
+            {([
+              ["confirmed", "I'll be there on time"],
+              ["early", "I'm online and ready"],
+              ["late", "I'll be late"],
+              ["maybe_late", "I might be late"],
+              ["uncertain", "I might not make it"],
+              ["cancelled", "I can't make it"],
+            ] as const).map(([value, label]) => <label key={value} className={`flex cursor-pointer items-center gap-3 rounded-lg border px-3 py-2.5 text-sm ${availabilityStatus === value ? "border-primary bg-primary/10" : "border-border"}`}>
+              <input type="radio" name="party-availability" checked={availabilityStatus === value} onChange={() => setAvailabilityStatus(value)} />
+              {label}
+            </label>)}
+            {(availabilityStatus === "late" || availabilityStatus === "maybe_late") && <div>
+              <label htmlFor="attendance-late-minutes" className="text-xs font-semibold">Minutes late</label>
+              <div className="mt-2 flex flex-wrap gap-2">{[5, 10, 15, 30, 60].map((v) => <Button size="sm" key={v} type="button" variant={lateMinutes === String(v) ? "default" : "outline"} onClick={() => setLateMinutes(String(v))}>{v}m</Button>)}</div>
+              <Input id="attendance-late-minutes" className="mt-2" type="number" min={1} max={1440} value={lateMinutes} onChange={(e) => setLateMinutes(e.target.value)} />
+            </div>}
+            <label className="block text-xs font-semibold">Message to organizer (optional)
+              <textarea className="mt-2 min-h-20 w-full rounded-md border border-input bg-background p-3 text-sm" maxLength={300} value={availabilityMessage} onChange={(e) => setAvailabilityMessage(e.target.value)} placeholder="e.g. Running late from work" />
+            </label>
+            {availabilityStatus === "cancelled" && <p className="text-xs text-destructive">Your slot will be released and a substitute may automatically be promoted.</p>}
+            <Button className="w-full" disabled={availabilityBusy} onClick={() => void saveAvailability()}>{availabilityBusy ? "Saving…" : "Save availability"}</Button>
+          </div>
+        </DialogContent>
+      </Dialog>
       <Dialog open={!!signupChoice} onOpenChange={(open) => { if (!open && !joining) setSignupChoice(null); }}>
         <DialogContent className="sm:max-w-md">
           <DialogHeader><DialogTitle>Join as {signupChoice?.role}</DialogTitle><DialogDescription>Choose the specialization you can bring to this party.</DialogDescription></DialogHeader>
