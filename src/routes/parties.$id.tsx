@@ -120,9 +120,20 @@ function PartyPage() {
       _char_name: me.data?.char_name || me.data?.display_name || "",
       ...(slotId !== null ? { _slot: slotId } : {})
     });
-    setJoining(false);
     if (error) toast.error(error.message);
-    else toast.success(data === "joined" ? "You're confirmed for that spot!" : "You've joined the substitute list. You will be considered when a spot opens.");
+    else {
+      if (chosenSpecialization) {
+        const saved = await supabase.from("party_specializations").upsert({
+          party_id: id, user_id: userId, role: desiredRole,
+          specialization: chosenSpecialization, updated_at: new Date().toISOString(),
+        }, { onConflict: "party_id,user_id" });
+        if (saved.error) toast.error(`Signup succeeded but specialization could not be saved: ${saved.error.message}`);
+        else qc.invalidateQueries({ queryKey: ["party-specializations", id] });
+      }
+      toast.success(data === "joined" ? "You're confirmed for that spot!" : "You've joined the substitute list. You will be considered when a spot opens.");
+      setSignupChoice(null);
+    }
+    setJoining(false);
     await Promise.all([refresh(), qc.invalidateQueries({ queryKey: ["party-waitlist", id] })]);
   }
   async function leave(memberId?: string) {
@@ -185,7 +196,7 @@ function PartyPage() {
                   {s.char_name || s.profiles?.display_name} <GuildBadge role={badges.data?.[s.user_id ?? ""]} /> {readiness.data?.find((r) => r.user_id === s.user_id)?.ready && <span title="Member ready" className="text-xs text-emerald-500">✓ Ready</span>} {readiness.data?.find((r) => r.user_id === s.user_id)?.supplies_ready && <span title="Supplies ready" className="text-xs text-emerald-500">✓ Supplies</span>} <span className="text-sm text-primary">{s.job && jobName(s.job)}</span>
                 </Link>
               ) : <div className="text-sm text-muted-foreground">Open slot</div>}
-              {s.user_id && specs.data?.find((spec) => spec.user_id === s.user_id)?.specialization && <div className="mt-1 text-xs font-medium text-primary">{specs.data.find((spec) => spec.user_id === s.user_id)?.specialization}</div>}
+              {s.user_id && specs.data?.find((spec) => spec.user_id === s.user_id)?.specialization && <div className="mt-1 text-xs font-medium text-primary">{specs.data?.find((spec) => spec.user_id === s.user_id)?.specialization}</div>}
             </div>
 
             {!s.user_id && !!userId && !mine && !reserve && <Button size="sm" disabled={joining} onClick={() => requestJoin(s.id, s.role)}>Join this role</Button>}
@@ -199,7 +210,7 @@ function PartyPage() {
         <p className="mt-1 text-sm text-muted-foreground">Substitutes who selected a matching role get priority; otherwise the earliest available substitute is promoted. No profile-class restrictions.</p>
         {(waitlist.data ?? []).length === 0 ? <p className="mt-4 text-sm text-muted-foreground">No substitutes yet.</p> :
           <ol className="mt-4 space-y-2">{(waitlist.data ?? []).map((w,i)=><li key={w.id} className="flex items-center gap-3 rounded-lg bg-secondary/40 px-3 py-2 text-sm">
-            <span className="text-muted-foreground">{i+1}.</span><span className="flex-1 font-medium">{w.char_name || w.profiles?.display_name} <GuildBadge role={badges.data?.[w.user_id]} /> <span className="font-normal text-muted-foreground">· Preferred: {jobName(w.job)}{specs.data?.find((spec) => spec.user_id === w.user_id)?.specialization ? ` · ${specs.data.find((spec) => spec.user_id === w.user_id)?.specialization}` : ""}</span></span>
+            <span className="text-muted-foreground">{i+1}.</span><span className="flex-1 font-medium">{w.char_name || w.profiles?.display_name} <GuildBadge role={badges.data?.[w.user_id]} /> <span className="font-normal text-muted-foreground">· Preferred: {jobName(w.job)}{specs.data?.find((spec) => spec.user_id === w.user_id)?.specialization ? ` · ${specs.data?.find((spec) => spec.user_id === w.user_id)?.specialization}` : ""}</span></span>
             {(isCreator || w.user_id===userId) && <Button size="sm" variant="ghost" onClick={()=>leave(w.user_id)}>Remove</Button>}
           </li>)}</ol>}
       </section>
