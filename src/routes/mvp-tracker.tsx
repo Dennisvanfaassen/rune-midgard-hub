@@ -1,6 +1,6 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { useEffect, useMemo, useState, type MouseEvent } from "react";
+import { useEffect, useRef, useState, type MouseEvent } from "react";
 import { Clock3, Crosshair, MapPin, Search, Skull, Trash2, Zap } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -45,18 +45,54 @@ const badgeClasses: Record<string, string> = {
   due: "bg-emerald-500/15 text-emerald-700 dark:text-emerald-300",
 };
 
-// Neutral GAT-style grid placeholder: actual GAT navigation cells can replace this layer.
+/** Read original GAT cell classifications from the extracted Ragnarokmap repository. */
+async function fetchGat(mapKey: string, signal: AbortSignal) {
+  const base = "https://raw.githubusercontent.com/Dennisvanfaassen/Ragnarokmap/main/Ragnarok%20World";
+  for (const folder of ["0_hat", "1_soulbound", "2_main"]) {
+    const response = await fetch(`${base}/${folder}/${encodeURIComponent(mapKey)}.gat`, { signal });
+    if (response.status === 404) continue;
+    if (!response.ok) throw new Error(`Map request failed (${response.status})`);
+    const bytes = await response.arrayBuffer();
+    const view = new DataView(bytes);
+    if (view.byteLength < 14 || String.fromCharCode(...new Uint8Array(bytes, 0, 4)) !== "GRAT") throw new Error("Invalid GAT map header");
+    const width = view.getUint32(6, true), height = view.getUint32(10, true);
+    if (width < 1 || height < 1 || width * height > 300000 || 14 + width * height * 20 > bytes.byteLength) throw new Error("Invalid GAT map dimensions");
+    return { width, height, view, source: folder };
+  }
+  throw new Error("GAT file not found in your extracted Ragnarok World database");
+}
 function GridMap({ spawn, pin, onPlace }: { spawn: MvpSpawn; pin: Tomb | undefined; onPlace: (x: number, y: number) => void }) {
-  const seed = [...spawn.mapKey].reduce((sum, ch) => sum * 31 + ch.charCodeAt(0), 7) >>> 0;
-  const size = 32;
-  const tiles = useMemo(() => Array.from({ length: size * size }, (_, n) => {
-    const x = n % size, y = Math.floor(n / size);
-    const edge = x < 2 || y < 2 || x >= size - 2 || y >= size - 2;
-    const wall = ((Math.sin(x * 0.37 + (seed % 23)) + Math.cos(y * 0.45 + (seed % 17))) > 1.35)
-      || ((x * 13 + y * 37 + seed) % 61 < 3);
-    return { x, y, passable: !edge && !wall };
-  }), [seed]);
-  function click(event: MouseEvent<SVGSVGElement>) {
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const [loaded, setLoaded] = useState<{ width: number; height: number; source: string } | null>(null);
+  const [message, setMessage] = useState("Loading extracted GAT map…");
+  useEffect(() => {
+    const controller = new AbortController();
+    setLoaded(null);
+    setMessage("Loading extracted GAT map…");
+    fetchGat(spawn.mapKey, controller.signal).then(({ width, height, view, source }) => {
+      if (controller.signal.aborted) return;
+      const canvas = canvasRef.current;
+      const context = canvas?.getContext("2d");
+      if (!canvas || !context) throw new Error("Canvas is unavailable");
+      canvas.width = width;
+      canvas.height = height;
+      const image = context.createImageData(width, height);
+      for (let y = 0; y < height; y++) for (let x = 0; x < width; x++) {
+        const cell = 14 + (y * width + x) * 20;
+        const type = view.getUint32(cell + 16, true);
+        const output = ((height - y - 1) * width + x) * 4;
+        const walkable = type === 0 || type === 3;
+        const rgb = walkable ? [109, 143, 148] : type === 1 ? [30, 53, 65] : [48, 83, 100];
+        image.data[output] = rgb[0]; image.data[output + 1] = rgb[1];
+        image.data[output + 2] = rgb[2]; image.data[output + 3] = 255;
+      }
+      context.putImageData(image, 0, 0);
+      setLoaded({ width, height, source });
+    }).catch((error: unknown) => { if (!controller.signal.aborted) setMessage(error instanceof Error ? error.message : "Unable to load GAT map"); });
+    return () => controller.abort();
+  }, [spawn.mapKey]);
+  function click(event: MouseEvent<HTMLDivElement>) {
+    if (!loaded) return;
     const bounds = event.currentTarget.getBoundingClientRect();
     const x = Math.max(0, Math.min(1, (event.clientX - bounds.left) / bounds.width));
     const y = Math.max(0, Math.min(1, (event.clientY - bounds.top) / bounds.height));
@@ -67,20 +103,18 @@ function GridMap({ spawn, pin, onPlace }: { spawn: MvpSpawn; pin: Tomb | undefin
       <span className="truncate font-semibold">{spawn.mapName}</span>
       <span className="shrink-0 font-mono text-xs text-slate-400">{spawn.mapKey}</span>
     </div>
-    <svg role="img" aria-label="Map grid. Click to set a tomb pin." viewBox="0 0 320 320" className="block aspect-square w-full cursor-crosshair" onClick={click}>
-      <rect width="320" height="320" fill="#142630" />
-      {tiles.map((tile) => <rect key={`${tile.x}-${tile.y}`} x={tile.x * 10} y={tile.y * 10} width="9.8" height="9.8" fill={tile.passable ? "#557783" : "#213b47"} opacity={tile.passable ? 0.74 : 0.85} />)}
-      {pin && <g transform={`translate(${pin.tomb_x * 320} ${pin.tomb_y * 320})`}>
-        <circle r="19" fill="#fb7185" opacity=".21" />
-        <path d="M0 -19 C-17 -19 -17 1 0 16 C17 1 17 -19 0 -19Z" fill="#fb7185" stroke="white" strokeWidth="1.5"/>
-        <circle cy="-8" r="5" fill="white"/>
-      </g>}
-    </svg>
-    <div className="flex items-center gap-2 border-t border-white/10 px-4 py-3 text-xs text-slate-300">
-      <MapPin className="h-4 w-4 text-rose-300" />
-      {pin ? `Tomb pinned · ${Math.round(pin.tomb_x * 100)}% / ${Math.round(pin.tomb_y * 100)}%` : "Click the grid to mark the MVP tomb location"}
+    <div onClick={click} className={`relative aspect-square w-full overflow-hidden bg-[#1e3541] ${loaded ? "cursor-crosshair" : ""}`}>
+      <canvas ref={canvasRef} className={`h-full w-full object-fill [image-rendering:pixelated] ${loaded ? "" : "opacity-0"}`} />
+      {!loaded && <div className="absolute inset-0 flex items-center justify-center p-6 text-center text-sm text-slate-300">{message}</div>}
+      {loaded && pin && <div className="pointer-events-none absolute -translate-x-1/2 -translate-y-full" style={{ left: `${pin.tomb_x * 100}%`, top: `${pin.tomb_y * 100}%` }}>
+        <div className="relative flex h-9 w-9 items-center justify-center rounded-full border-2 border-white bg-rose-400/90 shadow-lg shadow-rose-500/40"><MapPin className="h-5 w-5 text-white"/></div>
+      </div>}
     </div>
-    <p className="px-4 pb-3 text-[11px] leading-relaxed text-slate-400">Illustrative GAT-style grid, not yet real map geometry. Pins are relative to this grid; confirm locations once the extracted GAT map is connected.</p>
+    <div className="flex items-center gap-2 border-t border-white/10 px-4 py-3 text-xs text-slate-300">
+      <MapPin className="h-4 w-4 text-rose-300"/>
+      {loaded ? pin ? `Tomb pinned · ${Math.round(pin.tomb_x * 100)}% / ${Math.round(pin.tomb_y * 100)}%` : "Click the map to mark the MVP tomb location" : "Tomb placement is unavailable until the GAT map loads"}
+    </div>
+    {loaded && <p className="px-4 pb-3 text-[11px] text-slate-400">GAT navigation grid · {loaded.width} × {loaded.height} · source: {loaded.source}. North is up.</p>}
   </div>;
 }
 
@@ -220,7 +254,7 @@ function MvpTracker() {
           {!recent.length ? <p className="rounded-lg bg-secondary/30 p-4 text-sm text-muted-foreground">No kills reported yet. Be the first to track this MVP.</p> :
           <div className="divide-y divide-border">{recent.slice(0, 15).map((entry, index) => <div key={entry.id} className="flex items-center justify-between gap-3 py-3 text-sm"><div><span className="font-semibold">{dateTime(entry.killed_at)}</span>{index === 0 && <span className="ml-2 rounded bg-primary/10 px-2 py-0.5 text-[10px] font-semibold text-primary">Current timer</span>}<p className="text-xs text-muted-foreground">Recorded {dateTime(entry.created_at)}</p></div>{entry.reporter_id === userId && <Button size="sm" variant="ghost" disabled={busy} aria-label="Undo this kill report" title="Undo your report" onClick={() => undo(entry.id)}><Trash2 className="h-4 w-4"/></Button>}</div>)}</div>}
         </section>
-        <p className="text-xs leading-relaxed text-muted-foreground">MVP spawn locations and reference timers are historical Episode 8.2 estimates, not yet validated against SoulBound's server configuration. Map grids are illustrative until actual GAT walkability conversion is integrated.</p>
+        <p className="text-xs leading-relaxed text-muted-foreground">MVP spawn locations and reference timers are historical Episode 8.2 estimates, not yet validated against SoulBound's server configuration. GAT maps load directly from your extracted Ragnarokmap repository; unavailable maps cannot be pinned.</p>
       </div>
     </div>}
   </main>;
