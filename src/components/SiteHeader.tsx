@@ -9,6 +9,7 @@ import { WishlistNotifications } from "@/components/WishlistNotifications";
 
 const NAV = [
   { to: "/parties", label: "Party Planner" },
+  { to: "/calendar", label: "Calendar" },
   { to: "/mvp-tracker", label: "MVP Tracker" },
   { to: "/members", label: "Members" },
   { to: "/wishlists", label: "Wishlists" },
