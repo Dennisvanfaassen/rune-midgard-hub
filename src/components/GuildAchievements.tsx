@@ -4,6 +4,7 @@ import { BookOpen, Crown, Skull, Trophy, Medal } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { CharacterPortrait } from "@/components/CharacterPortrait";
 import { useAuth } from "@/lib/auth";
+import { MINI_BOSS_SPAWNS } from "@/lib/ro/mvp-spawns";
 
 type Profile = { id: string; display_name: string; char_name: string | null; avatar_path: string | null };
 type Winner = Profile & { points: number };
@@ -26,7 +27,7 @@ export function GuildAchievements() {
     refetchInterval: 60_000,
     queryFn: async () => {
       const [kills, guides, profiles] = await Promise.all([
-        supabase.from("mvp_kills").select("id,killer_id").not("killer_id", "is", null).limit(5000),
+        supabase.from("mvp_kills").select("id,boss_key,killer_id").not("killer_id", "is", null).limit(5000),
         supabase.from("forum_threads").select("id,author_id").eq("category", "guides").limit(5000),
         supabase.from("profiles").select("id,display_name,char_name,avatar_path"),
       ]);
@@ -41,8 +42,10 @@ export function GuildAchievements() {
           .map((p) => ({ ...p, points: counts.get(p.id) ?? 0 }))
           .sort((a,b) => b.points - a.points || (a.char_name || a.display_name).localeCompare(b.char_name || b.display_name));
       };
+      const miniKeys = new Set(MINI_BOSS_SPAWNS.map((spawn) => spawn.bossKey));
       return {
-        killers: compile((kills.data ?? []).flatMap((kill) => kill.killer_id ? [kill.killer_id] : [])),
+        killers: compile((kills.data ?? []).flatMap((kill) => kill.killer_id && !miniKeys.has(kill.boss_key) ? [kill.killer_id] : [])),
+        miniKillers: compile((kills.data ?? []).flatMap((kill) => kill.killer_id && miniKeys.has(kill.boss_key) ? [kill.killer_id] : [])),
         scholars: compile((guides.data ?? []).map((thread) => thread.author_id)),
       };
     },
@@ -54,12 +57,18 @@ export function GuildAchievements() {
     </div>
     {!userId && <p className="mb-4 text-sm text-muted-foreground">Sign in to see the guild achievement rankings.</p>}
     {ranking.isError && <p className="mb-4 rounded-lg border border-destructive/30 bg-destructive/10 p-3 text-sm text-destructive">Rankings unavailable. Apply the MVP achievement migration in Lovable Cloud.</p>}
-    <div className="grid gap-4 md:grid-cols-2">
+    <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
       <div className="overflow-hidden rounded-xl border border-border bg-card p-5">
         <div className="mb-4 flex items-center gap-3 border-b border-border pb-4"><div className="rounded-xl bg-rose-500/10 p-3 text-rose-500"><Skull className="h-6 w-6"/></div><div><h3 className="font-display text-xl font-bold">#1 MVP Killer</h3><p className="text-xs text-muted-foreground">Most self-reported MVP kills</p></div></div>
         {(!userId || ranking.isLoading) ? <p className="text-sm text-muted-foreground">Loading champions…</p> : <Winners winners={ranking.data?.killers ?? []} unit="kills"/>}
         <p className="mt-4 text-xs text-muted-foreground">Only kills where a reporter claims participation count. Historical timer reports do not count automatically; claims are not independently verified.</p>
         <Link to="/mvp-tracker" className="mt-3 inline-block text-sm font-semibold text-primary hover:underline">Track an MVP →</Link>
+      </div>
+      <div className="overflow-hidden rounded-xl border border-border bg-card p-5">
+        <div className="mb-4 flex items-center gap-3 border-b border-border pb-4"><div className="rounded-xl bg-violet-500/10 p-3 text-violet-500"><Trophy className="h-6 w-6"/></div><div><h3 className="font-display text-xl font-bold">#1 Mini-Boss Hunter</h3><p className="text-xs text-muted-foreground">Most self-reported mini-boss kills</p></div></div>
+        {(!userId || ranking.isLoading) ? <p className="text-sm text-muted-foreground">Loading hunters…</p> : <Winners winners={ranking.data?.miniKillers ?? []} unit="kills"/>}
+        <p className="mt-4 text-xs text-muted-foreground">Mini-boss participation is self-reported and tracked separately from MVP kills.</p>
+        <Link to="/mvp-tracker" className="mt-3 inline-block text-sm font-semibold text-primary hover:underline">Track a mini-boss →</Link>
       </div>
       <div className="overflow-hidden rounded-xl border border-border bg-card p-5">
         <div className="mb-4 flex items-center gap-3 border-b border-border pb-4"><div className="rounded-xl bg-sky-500/10 p-3 text-sky-500"><BookOpen className="h-6 w-6"/></div><div><h3 className="font-display text-xl font-bold">Rune Midgard Wikipedia</h3><p className="text-xs text-muted-foreground">Most guides contributed</p></div></div>
