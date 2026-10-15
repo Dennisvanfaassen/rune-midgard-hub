@@ -14,6 +14,7 @@ import { Route as AdminRouteImport } from './routes/admin'
 import { Route as AuthRouteImport } from './routes/auth'
 import { Route as CalculatorRouteImport } from './routes/calculator'
 import { Route as MarketRouteImport } from './routes/market'
+import { Route as MvpTrackerRouteImport } from './routes/mvp-tracker'
 import { Route as SkillsRouteImport } from './routes/skills'
 import { Route as WishlistsRouteImport } from './routes/wishlists'
 import { Route as ForumIndexRouteImport } from './routes/forum.index'
@@ -47,6 +48,11 @@ const CalculatorRoute = CalculatorRouteImport.update({
 const MarketRoute = MarketRouteImport.update({
   id: '/market',
   path: '/market',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const MvpTrackerRoute = MvpTrackerRouteImport.update({
+  id: '/mvp-tracker',
+  path: '/mvp-tracker',
   getParentRoute: () => rootRouteImport,
 } as any)
 const SkillsRoute = SkillsRouteImport.update({
@@ -101,6 +107,7 @@ export interface FileRoutesByFullPath {
   '/auth': typeof AuthRoute
   '/calculator': typeof CalculatorRoute
   '/market': typeof MarketRoute
+  '/mvp-tracker': typeof MvpTrackerRoute
   '/skills': typeof SkillsRoute
   '/wishlists': typeof WishlistsRoute
   '/forum/$id': typeof ForumIdRoute
@@ -117,6 +124,7 @@ export interface FileRoutesByTo {
   '/auth': typeof AuthRoute
   '/calculator': typeof CalculatorRoute
   '/market': typeof MarketRoute
+  '/mvp-tracker': typeof MvpTrackerRoute
   '/skills': typeof SkillsRoute
   '/wishlists': typeof WishlistsRoute
   '/forum/$id': typeof ForumIdRoute
@@ -134,6 +142,7 @@ export interface FileRoutesById {
   '/auth': typeof AuthRoute
   '/calculator': typeof CalculatorRoute
   '/market': typeof MarketRoute
+  '/mvp-tracker': typeof MvpTrackerRoute
   '/skills': typeof SkillsRoute
   '/wishlists': typeof WishlistsRoute
   '/forum/$id': typeof ForumIdRoute
@@ -152,6 +161,7 @@ export interface FileRouteTypes {
     | '/auth'
     | '/calculator'
     | '/market'
+    | '/mvp-tracker'
     | '/skills'
     | '/wishlists'
     | '/forum/$id'
@@ -168,6 +178,7 @@ export interface FileRouteTypes {
     | '/auth'
     | '/calculator'
     | '/market'
+    | '/mvp-tracker'
     | '/skills'
     | '/wishlists'
     | '/forum/$id'
@@ -184,6 +195,7 @@ export interface FileRouteTypes {
     | '/auth'
     | '/calculator'
     | '/market'
+    | '/mvp-tracker'
     | '/skills'
     | '/wishlists'
     | '/forum/$id'
@@ -201,6 +213,7 @@ export interface RootRouteChildren {
   AuthRoute: typeof AuthRoute
   CalculatorRoute: typeof CalculatorRoute
   MarketRoute: typeof MarketRoute
+  MvpTrackerRoute: typeof MvpTrackerRoute
   SkillsRoute: typeof SkillsRoute
   WishlistsRoute: typeof WishlistsRoute
   ForumIdRoute: typeof ForumIdRoute
@@ -247,6 +260,13 @@ declare module '@tanstack/react-router' {
       path: '/market'
       fullPath: '/market'
       preLoaderRoute: typeof MarketRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/mvp-tracker': {
+      id: '/mvp-tracker'
+      path: '/mvp-tracker'
+      fullPath: '/mvp-tracker'
+      preLoaderRoute: typeof MvpTrackerRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/skills': {
@@ -321,6 +341,7 @@ const rootRouteChildren: RootRouteChildren = {
   AuthRoute: AuthRoute,
   CalculatorRoute: CalculatorRoute,
   MarketRoute: MarketRoute,
+  MvpTrackerRoute: MvpTrackerRoute,
   SkillsRoute: SkillsRoute,
   WishlistsRoute: WishlistsRoute,
   ForumIdRoute: ForumIdRoute,
