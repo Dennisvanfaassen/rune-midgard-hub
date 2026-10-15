@@ -14,6 +14,12 @@ export type Database = {
   }
   public: {
     Tables: {
+      guild_notifications: {
+        Row: { id: string; recipient_id: string; actor_id: string; kind: string; wishlist_id: string | null; item_name: string; created_at: string; read_at: string | null }
+        Insert: { id?: string; recipient_id: string; actor_id: string; kind: string; wishlist_id?: string | null; item_name: string; created_at?: string; read_at?: string | null }
+        Update: { id?: string; recipient_id?: string; actor_id?: string; kind?: string; wishlist_id?: string | null; item_name?: string; created_at?: string; read_at?: string | null }
+        Relationships: []
+      }
       forum_posts: {
         Row: {
           author_id: string
