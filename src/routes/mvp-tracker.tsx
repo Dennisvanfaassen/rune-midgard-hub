@@ -384,6 +384,7 @@ function MvpTracker() {
         </section>
         <p className="text-xs leading-relaxed text-muted-foreground">MVP spawn locations and reference timers are historical Episode 8.2 estimates, not yet validated against SoulBound's server configuration. GAT maps load directly from your extracted Ragnarokmap repository; unavailable maps cannot be pinned.</p>
       </div>
+      </div>
       )}
     </div>}
   </main>;
