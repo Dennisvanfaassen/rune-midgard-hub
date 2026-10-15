@@ -79,7 +79,7 @@ function GridMap({ spawn, pin, onPlace }: { spawn: MvpSpawn; pin: Tomb | undefin
         const type = view.getUint32(cell + 16, true);
         const output = ((height - y - 1) * width + x) * 4;
         const walkable = type === 0 || type === 3;
-        const rgb = walkable ? [109, 143, 148] : type === 1 ? [30, 53, 65] : [48, 83, 100];
+        const rgb = walkable ? [109, 143, 148] as const : type === 1 ? [30, 53, 65] as const : [48, 83, 100] as const;
         image.data[output] = rgb[0]; image.data[output + 1] = rgb[1];
         image.data[output + 2] = rgb[2]; image.data[output + 3] = 255;
       }
@@ -122,7 +122,7 @@ function MvpTracker() {
   const { userId } = useAuth();
   const qc = useQueryClient();
   const [search, setSearch] = useState("");
-  const [selected, setSelected] = useState(mvpSpawnId(MVP_SPAWNS[0]));
+  const [selected, setSelected] = useState(mvpSpawnId(MVP_SPAWNS[0]!));
   const [minutesAgo, setMinutesAgo] = useState("35");
   const [alerts, setAlerts] = useState<string[]>([]);
   const [soundOn, setSoundOn] = useState(true);
@@ -218,7 +218,7 @@ function MvpTracker() {
       }
     }
   }, [userId, data, alerts, soundOn, now]);
-  const spawn = MVP_SPAWNS.find((s) => mvpSpawnId(s) === selected) ?? MVP_SPAWNS[0];
+  const spawn = MVP_SPAWNS.find((s) => mvpSpawnId(s) === selected) ?? MVP_SPAWNS[0]!;
   const recent = data?.kills.filter((k) => k.boss_key === spawn.bossKey && k.map_key === spawn.mapKey) ?? [];
   const kill = recent[0];
   const tomb = data?.tombs.find((p) => p.boss_key === spawn.bossKey && p.map_key === spawn.mapKey);
