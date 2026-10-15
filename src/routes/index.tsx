@@ -49,6 +49,7 @@ function Home() {
           <div className="mt-8 flex flex-wrap gap-3">
             <Button asChild size="lg"><Link to="/parties">Find a party</Link></Button>
             <Button asChild size="lg" variant="outline"><Link to="/calculator">Plan your build</Link></Button>
+            <Button asChild size="lg" variant="outline"><Link to="/calendar">Guild calendar</Link></Button>
           </div>
         </div>
       </section>
