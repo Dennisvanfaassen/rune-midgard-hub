@@ -160,6 +160,13 @@ function PartyPage() {
     });
     if (error) toast.error(error.message);
     else {
+      // A returning member must not keep an old cancelled attendance status.
+      const prior = attendance.data?.find((item) => item.user_id === userId);
+      if (prior?.status === "cancelled") {
+        const reset = await supabase.from("party_attendance").update({ status: "confirmed", late_minutes: null, message: "", updated_at: new Date().toISOString() }).eq("party_id", id).eq("user_id", userId);
+        if (reset.error) toast.error("Joined, but could not reset previous attendance: " + reset.error.message);
+        qc.invalidateQueries({ queryKey: ["party-attendance", id] });
+      }
       if (chosenSpecialization) {
         const saved = await supabase.from("party_specializations").upsert({
           party_id: id, user_id: userId, role: desiredRole,
