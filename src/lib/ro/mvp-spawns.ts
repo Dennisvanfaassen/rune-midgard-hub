@@ -1,5 +1,5 @@
 /** Provisional historical Episode 8.2 spawn reference; verify against SoulBound server data. */
-export type MvpSpawn = {bossKey:string;name:string;mapKey:string;mapName:string;minMinutes:number;maxMinutes:number};
+export type MvpSpawn = {bossKey:string;name:string;mapKey:string;mapName:string;minMinutes:number;maxMinutes:number;kind?:"mvp"|"mini"};
 export const MVP_SPAWNS: MvpSpawn[] = [
   {
     "bossKey": "amon_ra",
@@ -234,4 +234,143 @@ export const MVP_SPAWNS: MvpSpawn[] = [
     "maxMinutes": 130
   }
 ];
+/** Mini-boss map/timer references are provisional, not validated against SoulBound. */
+export const MINI_BOSS_SPAWNS: MvpSpawn[] = [
+  {
+    "bossKey": "angeling",
+    "name": "Angeling",
+    "mapKey": "pay_fild04",
+    "mapName": "Payon Field 4",
+    "minMinutes": 60,
+    "maxMinutes": 90,
+    "kind": "mini"
+  },
+  {
+    "bossKey": "angeling",
+    "name": "Angeling",
+    "mapKey": "xmas_dun01",
+    "mapName": "Toy Factory 1",
+    "minMinutes": 60,
+    "maxMinutes": 90,
+    "kind": "mini"
+  },
+  {
+    "bossKey": "angeling",
+    "name": "Angeling",
+    "mapKey": "yuno_fild03",
+    "mapName": "Yuno Field 3",
+    "minMinutes": 60,
+    "maxMinutes": 90,
+    "kind": "mini"
+  },
+  {
+    "bossKey": "dragon_fly",
+    "name": "Dragon Fly",
+    "mapKey": "moc_fild18",
+    "mapName": "Sograt Desert 18",
+    "minMinutes": 60,
+    "maxMinutes": 90,
+    "kind": "mini"
+  },
+  {
+    "bossKey": "ghostring",
+    "name": "Ghostring",
+    "mapKey": "pay_fild04",
+    "mapName": "Payon Field 4",
+    "minMinutes": 60,
+    "maxMinutes": 90,
+    "kind": "mini"
+  },
+  {
+    "bossKey": "ghostring",
+    "name": "Ghostring",
+    "mapKey": "prt_maze03",
+    "mapName": "Prontera Maze 3",
+    "minMinutes": 113,
+    "maxMinutes": 170,
+    "kind": "mini"
+  },
+  {
+    "bossKey": "ghostring",
+    "name": "Ghostring",
+    "mapKey": "treasure02",
+    "mapName": "Sunken Ship 2",
+    "minMinutes": 33,
+    "maxMinutes": 53,
+    "kind": "mini"
+  },
+  {
+    "bossKey": "mastering",
+    "name": "Mastering",
+    "mapKey": "pay_fild04",
+    "mapName": "Payon Field 4",
+    "minMinutes": 30,
+    "maxMinutes": 60,
+    "kind": "mini"
+  },
+  {
+    "bossKey": "eclipse",
+    "name": "Eclipse",
+    "mapKey": "prt_fild02",
+    "mapName": "Prontera Field 2",
+    "minMinutes": 30,
+    "maxMinutes": 60,
+    "kind": "mini"
+  },
+  {
+    "bossKey": "toad",
+    "name": "Toad",
+    "mapKey": "gef_fild01",
+    "mapName": "Geffen Field 1",
+    "minMinutes": 30,
+    "maxMinutes": 60,
+    "kind": "mini"
+  },
+  {
+    "bossKey": "vagabond_wolf",
+    "name": "Vagabond Wolf",
+    "mapKey": "prt_maze03",
+    "mapName": "Prontera Maze 3",
+    "minMinutes": 30,
+    "maxMinutes": 60,
+    "kind": "mini"
+  },
+  {
+    "bossKey": "vocal",
+    "name": "Vocal",
+    "mapKey": "prt_fild07",
+    "mapName": "Prontera Field 7",
+    "minMinutes": 30,
+    "maxMinutes": 60,
+    "kind": "mini"
+  },
+  {
+    "bossKey": "deviling",
+    "name": "Deviling",
+    "mapKey": "pay_fild04",
+    "mapName": "Payon Field 4",
+    "minMinutes": 60,
+    "maxMinutes": 90,
+    "kind": "mini"
+  },
+  {
+    "bossKey": "arc_angeling",
+    "name": "Arc Angeling",
+    "mapKey": "yuno_fild05",
+    "mapName": "Yuno Field 5",
+    "minMinutes": 60,
+    "maxMinutes": 90,
+    "kind": "mini"
+  },
+  {
+    "bossKey": "maya_purple",
+    "name": "Maya Purple",
+    "mapKey": "anthell02",
+    "mapName": "Ant Hell 2",
+    "minMinutes": 60,
+    "maxMinutes": 90,
+    "kind": "mini"
+  }
+];
+export const BOSS_SPAWNS: MvpSpawn[] = [...MVP_SPAWNS, ...MINI_BOSS_SPAWNS];
 export const mvpSpawnId = (spawn: MvpSpawn) => `${spawn.bossKey}:${spawn.mapKey}`;
