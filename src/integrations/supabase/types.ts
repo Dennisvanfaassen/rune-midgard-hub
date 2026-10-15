@@ -298,6 +298,7 @@ export type Database = {
           killed_at: string
           map_key: string
           reporter_id: string
+          killer_id: string | null
           tomb_x: number | null
           tomb_y: number | null
         }
@@ -308,6 +309,7 @@ export type Database = {
           killed_at: string
           map_key: string
           reporter_id: string
+          killer_id?: string | null
           tomb_x?: number | null
           tomb_y?: number | null
         }
@@ -318,6 +320,7 @@ export type Database = {
           killed_at?: string
           map_key?: string
           reporter_id?: string
+          killer_id?: string | null
           tomb_x?: number | null
           tomb_y?: number | null
         }
