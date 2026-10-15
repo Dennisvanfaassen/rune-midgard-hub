@@ -124,7 +124,6 @@ function MvpTracker() {
   const [soundOn, setSoundOn] = useState(true);
   const audioRef = useRef<AudioContext | null>(null);
   const alertedRef = useRef<Set<string>>(new Set());
-  const initializedRef = useRef(false);
   const [busy, setBusy] = useState(false);
   const [now, setNow] = useState(() => Date.now());
   const [pendingPin, setPendingPin] = useState<{ x: number; y: number } | null>(null);
@@ -140,7 +139,6 @@ function MvpTracker() {
       setSoundOn(localStorage.getItem(`mvp-sound:${userId}`) !== "off");
     } catch { setAlerts([]); }
     alertedRef.current = new Set();
-    initializedRef.current = false;
   }, [userId]);
   function chime() {
     try {
@@ -196,11 +194,6 @@ function MvpTracker() {
   useEffect(() => {
     if (!userId || !data || !alerts.length) return;
     const current = Date.now();
-    if (!initializedRef.current) {
-      // Do not surprise users with alerts for long-expired timers on first load.
-      initializedRef.current = true;
-      return;
-    }
     for (const spawn of MVP_SPAWNS) {
       const id = mvpSpawnId(spawn);
       if (!alerts.includes(id)) continue;
