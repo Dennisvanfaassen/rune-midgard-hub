@@ -645,6 +645,8 @@ export type Database = {
           avatar_path: string | null
           base_lv: number
           bio: string | null
+          birthday_month: number | null
+          birthday_day: number | null
           char_name: string | null
           created_at: string
           display_name: string
@@ -659,6 +661,8 @@ export type Database = {
           avatar_path?: string | null
           base_lv?: number
           bio?: string | null
+          birthday_month?: number | null
+          birthday_day?: number | null
           char_name?: string | null
           created_at?: string
           display_name?: string
@@ -673,6 +677,8 @@ export type Database = {
           avatar_path?: string | null
           base_lv?: number
           bio?: string | null
+          birthday_month?: number | null
+          birthday_day?: number | null
           char_name?: string | null
           created_at?: string
           display_name?: string
