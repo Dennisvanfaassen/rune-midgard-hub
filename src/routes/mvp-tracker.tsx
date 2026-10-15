@@ -253,7 +253,7 @@ function MvpTracker() {
   const maxSpawn = kill ? new Date(kill.killed_at).getTime() + spawn.maxMinutes * 60_000 : null;
   const current = status(spawn, kill, now);
   const drops = MVP_DROPS[spawn.bossKey] ?? [];
-  const tracked = bossList.flatMap((entry) => {
+  const tracked = BOSS_SPAWNS.flatMap((entry) => {
     const latest = data?.kills.find((k) => k.boss_key === entry.bossKey && k.map_key === entry.mapKey);
     if (!latest) return [];
     const earliest = new Date(latest.killed_at).getTime() + entry.minMinutes * 60_000;
@@ -272,7 +272,7 @@ function MvpTracker() {
     const { error } = await supabase.from("mvp_kills").insert({
       boss_key: spawn.bossKey, map_key: spawn.mapKey, killed_at: when.toISOString(), reporter_id: userId,
       tomb_x: tomb?.tomb_x ?? null, tomb_y: tomb?.tomb_y ?? null,
-      killer_id: spawn.kind !== "mini" && creditKill ? userId : null,
+      killer_id: creditKill ? userId : null,
     });
     setBusy(false);
     if (error) toast.error(error.message);
@@ -321,7 +321,7 @@ function MvpTracker() {
         <div className="space-y-4">
           <section className="overflow-hidden rounded-xl border border-border bg-card">
           <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border p-5 md:px-6">
-            <div><h2 className="font-display text-xl font-bold">{bossType === "mini" ? "Mini-boss run · Respawn overview" : "MVP run · Respawn overview"}</h2><p className="mt-1 text-xs text-muted-foreground">Upcoming MVP spawns, sorted by the shortest remaining time.</p></div>
+            <div><h2 className="font-display text-xl font-bold">{bossType === "mini" ? "Mini-boss run · Respawn overview" : "MVP run · Respawn overview"}</h2><p className="mt-1 text-xs text-muted-foreground">All reported MVP and mini-boss spawns, sorted by earliest respawn.</p></div>
             <div className="flex flex-wrap items-center gap-3">
               <label className="flex cursor-pointer items-center gap-2 rounded-lg border border-border bg-secondary/30 px-3 py-2 text-sm">
                 <input type="checkbox" checked={soundOn} onChange={(e) => void setSoundEnabled(e.target.checked)} aria-label="Enable MVP respawn alert sound" />
@@ -349,9 +349,9 @@ function MvpTracker() {
             {tracked.map((entry, i) => {
               const inWindow = entry.remaining <= 0;
               return <div key={mvpSpawnId(entry)} className={`flex items-center gap-2 px-4 py-2 transition-colors hover:bg-secondary/60 md:px-6 ${selected === mvpSpawnId(entry) ? "bg-primary/5" : ""}`}>
-                <button type="button" onClick={() => { setSelected(mvpSpawnId(entry)); setPendingPin(null); setActiveTab("tracker"); }} className="flex min-w-0 flex-1 items-center gap-3 py-1 text-left" aria-label={`Open ${entry.name} MVP tracker`}>
+                <button type="button" onClick={() => { setBossType(entry.kind === "mini" ? "mini" : "mvp"); setSelected(mvpSpawnId(entry)); setPendingPin(null); setActiveTab("tracker"); }} className="flex min-w-0 flex-1 items-center gap-3 py-1 text-left" aria-label={`Open ${entry.name} MVP tracker`}>
                   <span className="w-7 shrink-0 text-center font-mono text-sm text-muted-foreground">{String(i + 1).padStart(2,"0")}</span>
-                  <div className="min-w-0 flex-1"><p className="truncate font-semibold">{entry.name}</p><p className="truncate text-xs text-muted-foreground">{entry.mapName} · killed {dateTime(entry.lastKill.killed_at)}</p></div>
+                  <div className="min-w-0 flex-1"><p className="truncate font-semibold">{entry.name} <span className="ml-1 text-[10px] font-normal text-muted-foreground">{entry.kind === "mini" ? "Mini-boss" : "MVP"}</span></p><p className="truncate text-xs text-muted-foreground">{entry.mapName} · killed {dateTime(entry.lastKill.killed_at)}</p></div>
                   <div className="shrink-0 text-right"><p className={`font-mono text-lg font-bold tabular-nums ${inWindow ? "text-emerald-600 dark:text-emerald-400" : "text-foreground"}`}>{inWindow ? "Spawn window" : duration(entry.remaining)}</p><p className="text-[11px] text-muted-foreground">{clock(entry.earliest)} – {clock(entry.latestAt)}</p></div>
                 </button>
                 <Button type="button" size="icon" variant={alerts.includes(mvpSpawnId(entry)) ? "secondary" : "ghost"} aria-label={alerts.includes(mvpSpawnId(entry)) ? `Disable ${entry.name} respawn alert` : `Enable ${entry.name} respawn alert`} title={alerts.includes(mvpSpawnId(entry)) ? "Alert enabled — click to turn off" : "Get a respawn alert"} onClick={() => void toggleAlert(mvpSpawnId(entry))}>
@@ -412,7 +412,7 @@ function MvpTracker() {
               <div className="rounded-xl border border-border p-5">
                 <h3 className="font-semibold">Report an MVP kill</h3>
                 <p className="mt-1 text-xs text-muted-foreground">Your report immediately updates the guild-wide timer.</p>
-                {spawn.kind !== "mini" && <label className="mt-4 flex items-start gap-2 rounded-lg border border-border bg-secondary/30 p-3 text-sm"><input type="checkbox" checked={creditKill} onChange={(e) => setCreditKill(e.target.checked)} className="mt-1"/> <span><strong>I participated in this MVP kill</strong><span className="mt-0.5 block text-xs text-muted-foreground">Counts toward your self-reported MVP Killer achievement. Uncheck if you are only recording the timer for someone else.</span></span></label>}
+                {<label className="mt-4 flex items-start gap-2 rounded-lg border border-border bg-secondary/30 p-3 text-sm"><input type="checkbox" checked={creditKill} onChange={(e) => setCreditKill(e.target.checked)} className="mt-1"/> <span><strong>I participated in this MVP kill</strong><span className="mt-0.5 block text-xs text-muted-foreground">Counts toward your self-reported MVP Killer achievement. Uncheck if you are only recording the timer for someone else.</span></span></label>}
                 <Button className="mt-4 w-full" disabled={busy || !!error} onClick={() => report(new Date())}><Zap className="mr-2 h-4 w-4"/>Killed now</Button>
                 <div className="my-4 flex items-center gap-3 text-xs text-muted-foreground"><span className="h-px flex-1 bg-border"/><span>or report a past kill</span><span className="h-px flex-1 bg-border"/></div>
                 <label htmlFor="mvp-minutes-ago" className="text-xs font-medium">How many minutes ago was the kill?</label>
