@@ -108,7 +108,7 @@ function GridMap({ spawn, pin, onPlace }: { spawn: MvpSpawn; pin: Tomb | undefin
           <path d="M10.5 29.5C8.4 24.7 1.5 17.6 1.5 11.6A9 9 0 0 1 19.5 11.6C19.5 17.6 12.6 24.7 10.5 29.5Z" fill="#f43f5e" stroke="#fff" strokeWidth="1.6"/>
           <path d="M10.5 5.4L12 8.6 15.5 9.1 13 11.6 13.7 15.1 10.5 13.4 7.3 15.1 8 11.6 5.5 9.1 9 8.6Z" fill="#fff"/>
         </svg>
-      </div>
+      </div>}
     </div>
     <div className="flex items-center gap-2 border-t border-white/10 px-4 py-3 text-xs text-slate-300">
       <MapPin className="h-4 w-4 text-rose-300"/>
