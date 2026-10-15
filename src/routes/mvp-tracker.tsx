@@ -1,7 +1,7 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useRef, useState, type MouseEvent } from "react";
-import { Clock3, Crosshair, MapPin, Search, Skull, Trash2, Zap } from "lucide-react";
+import { Bell, BellOff, Clock3, Crosshair, MapPin, Search, Skull, Trash2, Volume2, Zap } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -25,10 +25,6 @@ function duration(milliseconds: number) {
   if (milliseconds <= 0) return "Now";
   const minutes = Math.ceil(milliseconds / 60_000);
   return minutes >= 60 ? `${Math.floor(minutes / 60)}h ${String(minutes % 60).padStart(2, "0")}m` : `${minutes}m`;
-}
-function localInputValue(d: Date) {
-  const offset = d.getTimezoneOffset() * 60_000;
-  return new Date(d.getTime() - offset).toISOString().slice(0, 16);
 }
 function status(spawn: MvpSpawn, kill: Kill | undefined, now: number) {
   if (!kill) return { label: "No report", kind: "unknown" };
@@ -123,7 +119,12 @@ function MvpTracker() {
   const qc = useQueryClient();
   const [search, setSearch] = useState("");
   const [selected, setSelected] = useState(mvpSpawnId(MVP_SPAWNS[0]));
-  const [manualTime, setManualTime] = useState("");
+  const [minutesAgo, setMinutesAgo] = useState("35");
+  const [alerts, setAlerts] = useState<string[]>([]);
+  const [soundOn, setSoundOn] = useState(true);
+  const audioRef = useRef<AudioContext | null>(null);
+  const alertedRef = useRef<Set<string>>(new Set());
+  const initializedRef = useRef(false);
   const [busy, setBusy] = useState(false);
   const [now, setNow] = useState(() => Date.now());
   const [pendingPin, setPendingPin] = useState<{ x: number; y: number } | null>(null);
@@ -131,6 +132,53 @@ function MvpTracker() {
     const timer = window.setInterval(() => setNow(Date.now()), 15_000);
     return () => window.clearInterval(timer);
   }, []);
+  useEffect(() => {
+    if (!userId) return;
+    try {
+      const stored = JSON.parse(localStorage.getItem(`mvp-alerts:${userId}`) ?? "[]");
+      setAlerts(Array.isArray(stored) ? stored.filter((x): x is string => typeof x === "string") : []);
+      setSoundOn(localStorage.getItem(`mvp-sound:${userId}`) !== "off");
+    } catch { setAlerts([]); }
+    alertedRef.current = new Set();
+    initializedRef.current = false;
+  }, [userId]);
+  function chime() {
+    try {
+      const context = audioRef.current;
+      if (!context || context.state !== "running") return;
+      for (const [index, pitch] of [784, 1047, 1318].entries()) {
+        const oscillator = context.createOscillator(), gain = context.createGain();
+        oscillator.type = "sine"; oscillator.frequency.value = pitch;
+        oscillator.connect(gain); gain.connect(context.destination);
+        const start = context.currentTime + index * 0.17;
+        gain.gain.setValueAtTime(0.0001, start);
+        gain.gain.exponentialRampToValueAtTime(0.15, start + 0.02);
+        gain.gain.exponentialRampToValueAtTime(0.0001, start + 0.27);
+        oscillator.start(start); oscillator.stop(start + 0.28);
+      }
+    } catch { /* Browser blocks audio until interaction. */ }
+  }
+  async function toggleAlert(id: string) {
+    if (!userId) return;
+    if (alerts.includes(id)) {
+      const next = alerts.filter((a) => a !== id);
+      setAlerts(next); localStorage.setItem(`mvp-alerts:${userId}`, JSON.stringify(next));
+      return;
+    }
+    // Request browser permission only after this user interaction.
+    if ("Notification" in window && Notification.permission === "default") {
+      try { await Notification.requestPermission(); } catch { /* In-page alerts still work. */ }
+    }
+    if (soundOn) {
+      try {
+        audioRef.current ??= new AudioContext();
+        await audioRef.current.resume();
+      } catch { /* Browser doesn't support sound. */ }
+    }
+    const next = [...alerts, id];
+    setAlerts(next); localStorage.setItem(`mvp-alerts:${userId}`, JSON.stringify(next));
+    toast.success("Respawn alert enabled while the tracker is open");
+  }
   const { data, isLoading, error } = useQuery({
     queryKey: ["mvp-tracker"],
     enabled: !!userId,
@@ -145,6 +193,34 @@ function MvpTracker() {
       return { kills: (kills.data ?? []) as Kill[], tombs: (tombs.data ?? []) as Tomb[] };
     },
   });
+  useEffect(() => {
+    if (!userId || !data || !alerts.length) return;
+    const current = Date.now();
+    if (!initializedRef.current) {
+      // Do not surprise users with alerts for long-expired timers on first load.
+      initializedRef.current = true;
+      return;
+    }
+    for (const spawn of MVP_SPAWNS) {
+      const id = mvpSpawnId(spawn);
+      if (!alerts.includes(id)) continue;
+      const kill = data.kills.find((k) => k.boss_key === spawn.bossKey && k.map_key === spawn.mapKey);
+      if (!kill) continue;
+      const earliest = new Date(kill.killed_at).getTime() + spawn.minMinutes * 60_000;
+      const key = `${userId}:${kill.id}`;
+      if (earliest > current || current - earliest > 120_000 || alertedRef.current.has(key)) continue;
+      const persisted = `mvp-alerted:${key}`;
+      if (localStorage.getItem(persisted)) { alertedRef.current.add(key); continue; }
+      alertedRef.current.add(key);
+      localStorage.setItem(persisted, "1");
+      const message = `${spawn.name} is respawning · ${spawn.mapName}`;
+      toast.info(message, { duration: 12000 });
+      if (soundOn) chime();
+      if ("Notification" in window && Notification.permission === "granted") {
+        try { new Notification(`${spawn.name} is respawning`, { body: spawn.mapName, tag: `mvp-${id}` }); } catch { /* in-page alert remains */ }
+      }
+    }
+  }, [userId, data, alerts, soundOn, now]);
   const spawn = MVP_SPAWNS.find((s) => mvpSpawnId(s) === selected) ?? MVP_SPAWNS[0];
   const recent = data?.kills.filter((k) => k.boss_key === spawn.bossKey && k.map_key === spawn.mapKey) ?? [];
   const kill = recent[0];
@@ -165,7 +241,7 @@ function MvpTracker() {
     });
     setBusy(false);
     if (error) toast.error(error.message);
-    else { toast.success(`${spawn.name} kill recorded`); setManualTime(""); refresh(); }
+    else { toast.success(`${spawn.name} kill recorded`); refresh(); }
   }
   async function savePin() {
     if (!userId || !pendingPin) return;
@@ -208,7 +284,7 @@ function MvpTracker() {
             const id = mvpSpawnId(s);
             const latest = data?.kills.find((k) => k.boss_key === s.bossKey && k.map_key === s.mapKey);
             const st = status(s, latest, now);
-            return <button key={id} type="button" onClick={() => { setSelected(id); setPendingPin(null); setManualTime(""); }} className={`flex w-full items-center justify-between gap-2 rounded-lg px-3 py-3 text-left transition hover:bg-secondary ${selected === id ? "bg-secondary ring-1 ring-primary/30" : ""}`}>
+            return <button key={id} type="button" onClick={() => { setSelected(id); setPendingPin(null); }} className={`flex w-full items-center justify-between gap-2 rounded-lg px-3 py-3 text-left transition hover:bg-secondary ${selected === id ? "bg-secondary ring-1 ring-primary/30" : ""}`}>
               <span className="min-w-0"><span className="block truncate text-sm font-semibold">{s.name}</span><span className="block truncate text-xs text-muted-foreground">{s.mapName}</span></span>
               <span className={`shrink-0 rounded-md px-2 py-1 text-[10px] font-medium ${badgeClasses[st.kind]}`}>{st.kind === "waiting" ? duration((new Date(latest!.killed_at).getTime() + s.minMinutes * 60_000) - now) : st.kind === "window" ? "Window" : st.kind === "due" ? "Due" : "—"}</span>
             </button>;
@@ -236,15 +312,24 @@ function MvpTracker() {
                 <p className="mt-2 text-sm text-muted-foreground">{kill ? `Last reported kill: ${dateTime(kill.killed_at)}` : "Record the first kill to start the timer."}</p>
                 <div className="mt-4 flex items-center gap-2 text-sm"><Clock3 className="h-4 w-4 text-primary"/><span>Reference respawn: {spawn.minMinutes}–{spawn.maxMinutes} minutes</span></div>
                 {kill && <p className="mt-3 text-xs text-muted-foreground">Window status: {status(spawn, kill, now).label}. Respawns are estimates, not confirmed SoulBound settings.</p>}
+                <div className="mt-4 border-t border-border pt-4">
+                  <Button variant={alerts.includes(selected) ? "default" : "outline"} size="sm" onClick={() => toggleAlert(selected)}>{alerts.includes(selected) ? <Bell className="mr-2 h-4 w-4"/> : <BellOff className="mr-2 h-4 w-4"/>}{alerts.includes(selected) ? "Notifications on" : "Notify me at earliest respawn"}</Button>
+                  <label className="mt-3 flex cursor-pointer items-center gap-2 text-xs text-muted-foreground"><input type="checkbox" checked={soundOn} onChange={async (e) => { setSoundOn(e.target.checked); if (userId) localStorage.setItem(`mvp-sound:${userId}`, e.target.checked ? "on" : "off"); if (e.target.checked) { try { audioRef.current ??= new AudioContext(); await audioRef.current.resume(); chime(); } catch {} } }}/> <Volume2 className="h-3.5 w-3.5"/> Play alert sound</label>
+                  <p className="mt-2 text-[11px] text-muted-foreground">Alerts are saved on this browser and only fire while this tracker page remains open. Allow browser notifications to receive desktop popups. No background or closed-browser push notifications.</p>
+                </div>
               </div>
               <div className="rounded-xl border border-border p-5">
                 <h3 className="font-semibold">Report an MVP kill</h3>
                 <p className="mt-1 text-xs text-muted-foreground">Your report immediately updates the guild-wide timer.</p>
                 <Button className="mt-4 w-full" disabled={busy || !!error} onClick={() => report(new Date())}><Zap className="mr-2 h-4 w-4"/>Killed now</Button>
-                <div className="my-4 flex items-center gap-3 text-xs text-muted-foreground"><span className="h-px flex-1 bg-border"/><span>or enter death time</span><span className="h-px flex-1 bg-border"/></div>
-                <label htmlFor="mvp-death-time" className="text-xs font-medium">Death time (your local timezone)</label>
-                <Input id="mvp-death-time" type="datetime-local" className="mt-2" max={localInputValue(new Date())} value={manualTime} onChange={(e) => setManualTime(e.target.value)}/>
-                <Button className="mt-3 w-full" variant="outline" disabled={!manualTime || busy || !!error} onClick={() => report(new Date(manualTime))}>Save death time</Button>
+                <div className="my-4 flex items-center gap-3 text-xs text-muted-foreground"><span className="h-px flex-1 bg-border"/><span>or report a past kill</span><span className="h-px flex-1 bg-border"/></div>
+                <label htmlFor="mvp-minutes-ago" className="text-xs font-medium">How many minutes ago was the kill?</label>
+                <div className="mt-2 flex items-center gap-2">
+                  <Input id="mvp-minutes-ago" aria-label="Minutes ago" type="number" inputMode="numeric" min={0} max={10080} step={1} className="min-w-0 flex-1" value={minutesAgo} onChange={(e) => setMinutesAgo(e.target.value)}/>
+                  <span className="whitespace-nowrap text-xs text-muted-foreground">minutes ago</span>
+                </div>
+                <div className="mt-2 flex flex-wrap gap-1.5">{[5,15,30,45,60].map((minutes) => <Button type="button" key={minutes} variant="secondary" size="sm" onClick={() => setMinutesAgo(String(minutes))}>{minutes}m</Button>)}</div>
+                <Button className="mt-3 w-full" variant="outline" disabled={!minutesAgo.trim() || !Number.isInteger(Number(minutesAgo)) || Number(minutesAgo) < 0 || Number(minutesAgo) > 10080 || busy || !!error} onClick={() => report(new Date(Date.now() - Number(minutesAgo) * 60_000))}>Save kill · {minutesAgo || "—"} minutes ago</Button>
               </div>
             </div>
           </div>
