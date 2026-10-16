@@ -1,4 +1,7 @@
-/** Provisional historical Episode 8.2 spawn reference; verify against SoulBound server data. */
+/** SoulBound spawn windows transcribed from the user's SoulBound MVP table (2026-10-16).
+ * Units are minutes; fractional minutes retain the seconds in 86:40 and 94:10.
+ * Only the supplied 26 MVP spawns are included. Mini-boss references remain provisional.
+ */
 export type MvpSpawn = {bossKey:string;name:string;mapKey:string;mapName:string;minMinutes:number;maxMinutes:number;kind?:"mvp"|"mini"};
 export const MVP_SPAWNS: MvpSpawn[] = [
   {
@@ -7,7 +10,7 @@ export const MVP_SPAWNS: MvpSpawn[] = [
     "mapKey": "moc_pryd06",
     "mapName": "Pyramid B4",
     "minMinutes": 60,
-    "maxMinutes": 70
+    "maxMinutes": 86.66666666666667
   },
   {
     "bossKey": "baphomet",
@@ -15,7 +18,7 @@ export const MVP_SPAWNS: MvpSpawn[] = [
     "mapKey": "prt_maze03",
     "mapName": "Prontera Maze 3",
     "minMinutes": 120,
-    "maxMinutes": 130
+    "maxMinutes": 180
   },
   {
     "bossKey": "dark_lord",
@@ -23,7 +26,7 @@ export const MVP_SPAWNS: MvpSpawn[] = [
     "mapKey": "gl_chyard",
     "mapName": "Glast Heim Churchyard",
     "minMinutes": 60,
-    "maxMinutes": 70
+    "maxMinutes": 90
   },
   {
     "bossKey": "dark_lord",
@@ -31,7 +34,7 @@ export const MVP_SPAWNS: MvpSpawn[] = [
     "mapKey": "gld_dun04",
     "mapName": "Guild Dungeon 4",
     "minMinutes": 480,
-    "maxMinutes": 490
+    "maxMinutes": 600
   },
   {
     "bossKey": "doppelganger",
@@ -39,7 +42,15 @@ export const MVP_SPAWNS: MvpSpawn[] = [
     "mapKey": "gef_dun02",
     "mapName": "Geffen Dungeon 3",
     "minMinutes": 120,
-    "maxMinutes": 130
+    "maxMinutes": 180
+  },
+  {
+    "bossKey": "doppelganger",
+    "name": "Doppelganger",
+    "mapKey": "gld_dun02",
+    "mapName": "Guild Dungeon 2",
+    "minMinutes": 480,
+    "maxMinutes": 600
   },
   {
     "bossKey": "dracula",
@@ -47,7 +58,7 @@ export const MVP_SPAWNS: MvpSpawn[] = [
     "mapKey": "gef_dun01",
     "mapName": "Geffen Dungeon 2",
     "minMinutes": 60,
-    "maxMinutes": 70
+    "maxMinutes": 90
   },
   {
     "bossKey": "drake",
@@ -55,15 +66,7 @@ export const MVP_SPAWNS: MvpSpawn[] = [
     "mapKey": "treasure02",
     "mapName": "Sunken Ship 2",
     "minMinutes": 120,
-    "maxMinutes": 130
-  },
-  {
-    "bossKey": "eddga",
-    "name": "Eddga",
-    "mapKey": "pay_fild11",
-    "mapName": "Payon Field 11",
-    "minMinutes": 120,
-    "maxMinutes": 130
+    "maxMinutes": 180
   },
   {
     "bossKey": "eddga",
@@ -71,23 +74,23 @@ export const MVP_SPAWNS: MvpSpawn[] = [
     "mapKey": "gld_dun01",
     "mapName": "Guild Dungeon 1",
     "minMinutes": 480,
-    "maxMinutes": 490
+    "maxMinutes": 600
+  },
+  {
+    "bossKey": "eddga",
+    "name": "Eddga",
+    "mapKey": "pay_fild11",
+    "mapName": "Payon Field 11",
+    "minMinutes": 120,
+    "maxMinutes": 180
   },
   {
     "bossKey": "evil_snake_lord",
     "name": "Evil Snake Lord",
     "mapKey": "gon_dun03",
     "mapName": "Gonryun Dungeon 3",
-    "minMinutes": 120,
-    "maxMinutes": 130
-  },
-  {
-    "bossKey": "garm",
-    "name": "Garm / Hatii",
-    "mapKey": "xmas_fild01",
-    "mapName": "Lutie Field",
-    "minMinutes": 120,
-    "maxMinutes": 130
+    "minMinutes": 94.16666666666667,
+    "maxMinutes": 155
   },
   {
     "bossKey": "golden_thief_bug",
@@ -95,31 +98,15 @@ export const MVP_SPAWNS: MvpSpawn[] = [
     "mapKey": "prt_sewb4",
     "mapName": "Prontera Culvert 4",
     "minMinutes": 60,
-    "maxMinutes": 70
+    "maxMinutes": 90
   },
   {
-    "bossKey": "incantation_samurai",
-    "name": "Incantation Samurai",
-    "mapKey": "ama_dun03",
-    "mapName": "Amatsu Dungeon 3",
-    "minMinutes": 91,
-    "maxMinutes": 101
-  },
-  {
-    "bossKey": "lady_tanee",
-    "name": "Lady Tanee",
-    "mapKey": "ayo_dun02",
-    "mapName": "Ayothaya Dungeon 2",
-    "minMinutes": 420,
-    "maxMinutes": 430
-  },
-  {
-    "bossKey": "lord_of_death",
-    "name": "Lord of Death",
-    "mapKey": "niflheim",
-    "mapName": "Niflheim",
-    "minMinutes": 133,
-    "maxMinutes": 143
+    "bossKey": "garm",
+    "name": "Hatii",
+    "mapKey": "xmas_fild01",
+    "mapName": "Lutie Field",
+    "minMinutes": 120,
+    "maxMinutes": 180
   },
   {
     "bossKey": "maya",
@@ -127,7 +114,7 @@ export const MVP_SPAWNS: MvpSpawn[] = [
     "mapKey": "anthell02",
     "mapName": "Ant Hell 2",
     "minMinutes": 120,
-    "maxMinutes": 130
+    "maxMinutes": 180
   },
   {
     "bossKey": "maya",
@@ -135,7 +122,7 @@ export const MVP_SPAWNS: MvpSpawn[] = [
     "mapKey": "gld_dun03",
     "mapName": "Guild Dungeon 3",
     "minMinutes": 480,
-    "maxMinutes": 490
+    "maxMinutes": 600
   },
   {
     "bossKey": "mistress",
@@ -143,7 +130,7 @@ export const MVP_SPAWNS: MvpSpawn[] = [
     "mapKey": "mjolnir_04",
     "mapName": "Mt. Mjolnir 4",
     "minMinutes": 120,
-    "maxMinutes": 130
+    "maxMinutes": 180
   },
   {
     "bossKey": "moonlight_flower",
@@ -151,7 +138,7 @@ export const MVP_SPAWNS: MvpSpawn[] = [
     "mapKey": "pay_dun04",
     "mapName": "Payon Cave 5",
     "minMinutes": 60,
-    "maxMinutes": 70
+    "maxMinutes": 180
   },
   {
     "bossKey": "orc_hero",
@@ -159,15 +146,7 @@ export const MVP_SPAWNS: MvpSpawn[] = [
     "mapKey": "gef_fild14",
     "mapName": "Geffen Field 14",
     "minMinutes": 60,
-    "maxMinutes": 70
-  },
-  {
-    "bossKey": "orc_hero",
-    "name": "Orc Hero",
-    "mapKey": "gef_fild02",
-    "mapName": "Geffen Field 2",
-    "minMinutes": 1440,
-    "maxMinutes": 1450
+    "maxMinutes": 90
   },
   {
     "bossKey": "orc_lord",
@@ -175,7 +154,7 @@ export const MVP_SPAWNS: MvpSpawn[] = [
     "mapKey": "gef_fild10",
     "mapName": "Geffen Field 10",
     "minMinutes": 120,
-    "maxMinutes": 130
+    "maxMinutes": 180
   },
   {
     "bossKey": "osiris",
@@ -183,7 +162,7 @@ export const MVP_SPAWNS: MvpSpawn[] = [
     "mapKey": "moc_pryd04",
     "mapName": "Pyramid 4",
     "minMinutes": 60,
-    "maxMinutes": 70
+    "maxMinutes": 180
   },
   {
     "bossKey": "pharaoh",
@@ -191,7 +170,7 @@ export const MVP_SPAWNS: MvpSpawn[] = [
     "mapKey": "in_sphinx5",
     "mapName": "Sphinx 5",
     "minMinutes": 60,
-    "maxMinutes": 70
+    "maxMinutes": 90
   },
   {
     "bossKey": "phreeoni",
@@ -199,7 +178,15 @@ export const MVP_SPAWNS: MvpSpawn[] = [
     "mapKey": "moc_fild15",
     "mapName": "Sograt Desert 15",
     "minMinutes": 120,
-    "maxMinutes": 130
+    "maxMinutes": 180
+  },
+  {
+    "bossKey": "incantation_samurai",
+    "name": "Samurai Specter",
+    "mapKey": "ama_dun03",
+    "mapName": "Amatsu Dungeon 3",
+    "minMinutes": 91,
+    "maxMinutes": 151
   },
   {
     "bossKey": "stormy_knight",
@@ -207,15 +194,15 @@ export const MVP_SPAWNS: MvpSpawn[] = [
     "mapKey": "xmas_dun02",
     "mapName": "Toy Factory 2",
     "minMinutes": 60,
-    "maxMinutes": 70
+    "maxMinutes": 180
   },
   {
     "bossKey": "tao_gunka",
     "name": "Tao Gunka",
-    "mapKey": "beach_dun",
-    "mapName": "Kokomo Beach Dungeon",
-    "minMinutes": 360,
-    "maxMinutes": 370
+    "mapKey": "ayo_dun02",
+    "mapName": "Ayothaya Dungeon 2",
+    "minMinutes": 123,
+    "maxMinutes": 183
   },
   {
     "bossKey": "turtle_general",
@@ -223,15 +210,7 @@ export const MVP_SPAWNS: MvpSpawn[] = [
     "mapKey": "tur_dun04",
     "mapName": "Turtle Island 4",
     "minMinutes": 60,
-    "maxMinutes": 70
-  },
-  {
-    "bossKey": "white_lady",
-    "name": "White Lady / Bacsojin",
-    "mapKey": "lou_dun03",
-    "mapName": "Louyang Dungeon 3",
-    "minMinutes": 120,
-    "maxMinutes": 130
+    "maxMinutes": 72
   }
 ];
 /** Mini-boss map/timer references are provisional, not validated against SoulBound. */
