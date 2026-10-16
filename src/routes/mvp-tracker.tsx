@@ -316,7 +316,7 @@ function MvpTracker() {
       <div>
         <div className="mb-2 flex items-center gap-2 text-xs font-semibold uppercase tracking-[.2em] text-primary"><Skull className="h-4 w-4" /> Guild hunting tools</div>
         <h1 className="font-display text-3xl font-bold tracking-tight md:text-4xl">{bossType === "mini" ? "Mini-Boss Tracker" : "MVP Tracker"}</h1>
-        <p className="mt-2 max-w-2xl text-sm text-muted-foreground">Coordinate hunts with live respawn windows, shared kill reports and tomb markers. Episode 8.2 reference timings.</p>
+        <p className="mt-2 max-w-2xl text-sm text-muted-foreground">Coordinate hunts with live respawn windows, shared kill reports and tomb markers. SoulBound MVP timings and provisional mini-boss timings.</p>
       </div>
       <span className="rounded-full border border-border bg-card px-4 py-2 text-sm text-muted-foreground">{MVP_SPAWNS.length} MVP maps · {MINI_BOSS_SPAWNS.length} mini-boss maps</span>
     </div>
@@ -374,7 +374,7 @@ function MvpTracker() {
             })}
           </div>}
         </section>
-          <p className="text-xs text-muted-foreground">Choose the bell on each MVP or select "Alert me for all". Sound is optional and shared with the MVP Tracker tab. Alerts fire while the tracker is open; browser notifications need permission. Times are historical estimates until verified for SoulBound.</p>
+          <p className="text-xs text-muted-foreground">Choose the bell on each MVP or select "Alert me for all". Sound is optional and shared with the MVP Tracker tab. Alerts fire while the tracker is open; browser notifications need permission. MVP times are from the supplied SoulBound table; mini-boss times remain estimates.</p>
         </div>
       ) : (
       <div className="grid items-start gap-5 lg:grid-cols-[260px_minmax(0,1fr)] xl:grid-cols-[290px_minmax(0,1fr)]">
@@ -454,7 +454,7 @@ function MvpTracker() {
             {entry.reporter_id === userId && <Button size="sm" variant="ghost" disabled={busy} aria-label="Undo this kill report" title="Undo your report" onClick={() => undo(entry.id)}><Trash2 className="h-4 w-4"/></Button>}
             </div></div>)}</div>}
         </section>
-        <p className="text-xs leading-relaxed text-muted-foreground">MVP spawn locations and reference timers are historical Episode 8.2 estimates, not yet validated against SoulBound's server configuration. GAT maps load directly from your extracted Ragnarokmap repository; unavailable maps cannot be pinned.</p>
+        <p className="text-xs leading-relaxed text-muted-foreground">MVP spawn windows match the SoulBound table provided on 16 October 2026. Mini-boss locations and timers remain provisional. GAT maps load directly from your extracted Ragnarokmap repository; unavailable maps cannot be pinned.</p>
       </div>
       </div>
       )}
