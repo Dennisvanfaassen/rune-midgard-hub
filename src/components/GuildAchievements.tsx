@@ -26,12 +26,14 @@ export function GuildAchievements() {
     queryKey: ["guild-achievements"],
     refetchInterval: 60_000,
     queryFn: async () => {
-      const [kills, guides, profiles] = await Promise.all([
+      const [kills, participants, guides, profiles] = await Promise.all([
         supabase.from("mvp_kills").select("id,boss_key,killer_id").not("killer_id", "is", null).limit(5000),
+        supabase.from("mvp_kill_participants").select("kill_id,user_id").limit(10000),
         supabase.from("forum_threads").select("id,author_id").eq("category", "guides").limit(5000),
         supabase.from("profiles").select("id,display_name,char_name,avatar_path"),
       ]);
       if (kills.error) throw kills.error;
+      if (participants.error) throw participants.error;
       if (guides.error) throw guides.error;
       if (profiles.error) throw profiles.error;
       const members = (profiles.data ?? []) as Profile[];
@@ -43,9 +45,25 @@ export function GuildAchievements() {
           .sort((a,b) => b.points - a.points || (a.char_name || a.display_name).localeCompare(b.char_name || b.display_name));
       };
       const miniKeys = new Set(MINI_BOSS_SPAWNS.map((spawn) => spawn.bossKey));
+      const creditByKill = new Map<string, Set<string>>();
+      (participants.data ?? []).forEach(entry => {
+        const members = creditByKill.get(entry.kill_id) ?? new Set<string>();
+        members.add(entry.user_id);
+        creditByKill.set(entry.kill_id, members);
+      });
+      // Existing single-person credit is retained without duplicate counting.
+      (kills.data ?? []).forEach(kill => {
+        if (!kill.killer_id) return;
+        const members = creditByKill.get(kill.id) ?? new Set<string>();
+        members.add(kill.killer_id);
+        creditByKill.set(kill.id, members);
+      });
+      const credit = (mini: boolean) => (kills.data ?? []).flatMap(kill =>
+        miniKeys.has(kill.boss_key) === mini ? [...(creditByKill.get(kill.id) ?? [])] : []
+      );
       return {
-        killers: compile((kills.data ?? []).flatMap((kill) => kill.killer_id && !miniKeys.has(kill.boss_key) ? [kill.killer_id] : [])),
-        miniKillers: compile((kills.data ?? []).flatMap((kill) => kill.killer_id && miniKeys.has(kill.boss_key) ? [kill.killer_id] : [])),
+        killers: compile(credit(false)),
+        miniKillers: compile(credit(true)),
         scholars: compile((guides.data ?? []).map((thread) => thread.author_id)),
       };
     },
@@ -61,7 +79,7 @@ export function GuildAchievements() {
       <div className="overflow-hidden rounded-xl border border-border bg-card p-5">
         <div className="mb-4 flex items-center gap-3 border-b border-border pb-4"><div className="rounded-xl bg-rose-500/10 p-3 text-rose-500"><Skull className="h-6 w-6"/></div><div><h3 className="font-display text-xl font-bold">#1 MVP Killer</h3><p className="text-xs text-muted-foreground">Most self-reported MVP kills</p></div></div>
         {(!userId || ranking.isLoading) ? <p className="text-sm text-muted-foreground">Loading champions…</p> : <Winners winners={ranking.data?.killers ?? []} unit="kills"/>}
-        <p className="mt-4 text-xs text-muted-foreground">Only kills where a reporter claims participation count. Historical timer reports do not count automatically; claims are not independently verified.</p>
+        <p className="mt-4 text-xs text-muted-foreground">Each selected party member receives one credit per kill. Historical self-claims still count; participation is self-reported.</p>
         <Link to="/mvp-tracker" className="mt-3 inline-block text-sm font-semibold text-primary hover:underline">Track an MVP →</Link>
       </div>
       <div className="overflow-hidden rounded-xl border border-border bg-card p-5">
