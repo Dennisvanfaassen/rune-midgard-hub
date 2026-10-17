@@ -9,6 +9,7 @@ import { useAuth } from "@/lib/auth";
 import { supabase } from "@/integrations/supabase/client";
 import { MVP_SPAWNS, MINI_BOSS_SPAWNS, BOSS_SPAWNS, mvpSpawnId, type MvpSpawn } from "@/lib/ro/mvp-spawns";
 import { MVP_DROPS } from "@/lib/ro/mvp-drops";
+import { MvpKillDialog } from "@/components/MvpKillDialog";
 
 export const Route = createFileRoute("/mvp-tracker")({
   head: () => ({ meta: [
@@ -126,7 +127,7 @@ function MvpTracker() {
   const [activeTab, setActiveTab] = useState<"tracker" | "overview">("tracker");
   const [selected, setSelected] = useState(mvpSpawnId(MVP_SPAWNS[0]!));
   const [minutesAgo, setMinutesAgo] = useState("35");
-  const [creditKill, setCreditKill] = useState(true);
+  const [reportTime, setReportTime] = useState<Date | null>(null);
   const [alerts, setAlerts] = useState<string[]>([]);
   const [soundOn, setSoundOn] = useState(true);
   const audioRef = useRef<AudioContext | null>(null);
@@ -246,6 +247,17 @@ function MvpTracker() {
     staleTime: 60_000,
   });
   const reporterName = (id: string) => reporters.data?.[id] ?? "Guild member";
+  const guildMembers = useQuery({
+    queryKey: ["guild-members-for-kills"],
+    enabled: !!userId,
+    staleTime: 60_000,
+    queryFn: async () => {
+      const { data, error } = await supabase.from("profiles").select("id,display_name,char_name,avatar_path").order("display_name");
+      if (error) throw error;
+      return data ?? [];
+    },
+  });
+
   const kill = recent[0];
   const tomb = data?.tombs.find((p) => p.boss_key === spawn.bossKey && p.map_key === spawn.mapKey);
   const filtered = bossList.filter((s) => `${s.name} ${s.mapName} ${s.mapKey}`.toLowerCase().includes(search.trim().toLowerCase()));
@@ -265,18 +277,32 @@ function MvpTracker() {
 
   const refresh = () => qc.invalidateQueries({ queryKey: ["mvp-tracker"] });
 
-  async function report(when: Date) {
-    if (!userId) { toast.error("Sign in to report MVP kills"); return; }
-    if (!Number.isFinite(when.getTime()) || when.getTime() > Date.now() + 60_000) { toast.error("Enter a valid time in the past"); return; }
+  async function report(when: Date, participants: string[]): Promise<boolean> {
+    if (!userId) { toast.error("Sign in to report boss kills"); return false; }
+    if (!Number.isFinite(when.getTime()) || when.getTime() > Date.now() + 60_000) { toast.error("Enter a valid kill time"); return false; }
     setBusy(true);
-    const { error } = await supabase.from("mvp_kills").insert({
+    const chosen = [...new Set(participants)].filter(id => guildMembers.data?.some(member => member.id === id));
+    const result = await supabase.from("mvp_kills").insert({
       boss_key: spawn.bossKey, map_key: spawn.mapKey, killed_at: when.toISOString(), reporter_id: userId,
       tomb_x: tomb?.tomb_x ?? null, tomb_y: tomb?.tomb_y ?? null,
-      killer_id: creditKill ? userId : null,
-    });
+      killer_id: chosen.includes(userId) ? userId : null,
+    }).select("id").single();
+    if (result.error) {
+      setBusy(false);
+      toast.error(result.error.message);
+      return false;
+    }
+    if (chosen.length) {
+      const credited = await supabase.from("mvp_kill_participants").insert(chosen.map(memberId => ({
+        kill_id: result.data.id, user_id: memberId, added_by: userId,
+      })));
+      if (credited.error) toast.error("Timer saved, but party kill credits were not saved. Run migration 0018: " + credited.error.message);
+      else toast.success(`${spawn.name} reported · ${chosen.length} guildmates credited!`);
+    } else toast.success(`${spawn.name} respawn timer saved!`);
     setBusy(false);
-    if (error) toast.error(error.message);
-    else { toast.success(`${spawn.name} kill recorded`); refresh(); qc.invalidateQueries({ queryKey: ["guild-achievements"] }); }
+    refresh();
+    qc.invalidateQueries({ queryKey: ["guild-achievements"] });
+    return true;
   }
   async function claimKill(reportId: string) {
     if (!userId || busy) return;
@@ -312,6 +338,10 @@ function MvpTracker() {
   }
 
   return <main className="mx-auto max-w-7xl px-4 py-8 md:py-12">
+    <MvpKillDialog open={!!reportTime} onOpenChange={(open) => { if (!open) setReportTime(null); }}
+      bossName={spawn.name} when={reportTime} reporterId={userId} busy={busy}
+      members={guildMembers.data ?? []} onSave={(participants) => report(reportTime!, participants)} />
+
     <div className="mb-8 flex flex-wrap items-end justify-between gap-4">
       <div>
         <div className="mb-2 flex items-center gap-2 text-xs font-semibold uppercase tracking-[.2em] text-primary"><Skull className="h-4 w-4" /> Guild hunting tools</div>
@@ -423,18 +453,16 @@ function MvpTracker() {
                 </div>
               </div>
               <div className="rounded-xl border border-border p-5">
-                <h3 className="font-semibold">Report an MVP kill</h3>
-                <p className="mt-1 text-xs text-muted-foreground">Your report immediately updates the guild-wide timer.</p>
-                {<label className="mt-4 flex items-start gap-2 rounded-lg border border-border bg-secondary/30 p-3 text-sm"><input type="checkbox" checked={creditKill} onChange={(e) => setCreditKill(e.target.checked)} className="mt-1"/> <span><strong>I participated in this MVP kill</strong><span className="mt-0.5 block text-xs text-muted-foreground">Counts toward your self-reported MVP Killer achievement. Uncheck if you are only recording the timer for someone else.</span></span></label>}
-                <Button className="mt-4 w-full" disabled={busy || !!error} onClick={() => report(new Date())}><Zap className="mr-2 h-4 w-4"/>Killed now</Button>
-                <div className="my-4 flex items-center gap-3 text-xs text-muted-foreground"><span className="h-px flex-1 bg-border"/><span>or report a past kill</span><span className="h-px flex-1 bg-border"/></div>
-                <label htmlFor="mvp-minutes-ago" className="text-xs font-medium">How many minutes ago was the kill?</label>
+                <h3 className="text-lg font-bold">Fast kill report</h3>
+                <p className="mt-1 text-xs text-muted-foreground">Capture the exact kill time, tap your party members and save. Your last team is one tap away.</p>
+                <Button className="mt-4 h-14 w-full text-base font-bold" disabled={busy || !!error} onClick={() => setReportTime(new Date())}><Zap className="mr-2 h-5 w-5"/> Killed now · Add party</Button>
+                <div className="my-4 flex items-center gap-3 text-xs text-muted-foreground"><span className="h-px flex-1 bg-border"/><span>or enter an earlier kill</span><span className="h-px flex-1 bg-border"/></div>
+                <label htmlFor="mvp-minutes-ago" className="text-xs font-medium">Minutes ago</label>
                 <div className="mt-2 flex items-center gap-2">
-                  <Input id="mvp-minutes-ago" aria-label="Minutes ago" type="number" inputMode="numeric" min={0} max={10080} step={1} className="min-w-0 flex-1" value={minutesAgo} onChange={(e) => setMinutesAgo(e.target.value)}/>
-                  <span className="whitespace-nowrap text-xs text-muted-foreground">minutes ago</span>
+                  <Input id="mvp-minutes-ago" type="number" inputMode="numeric" min={0} max={10080} step={1} value={minutesAgo} onChange={(e) => setMinutesAgo(e.target.value)}/>
+                  <Button type="button" variant="outline" disabled={busy || !!error || !minutesAgo.trim() || !Number.isInteger(Number(minutesAgo)) || Number(minutesAgo) < 0 || Number(minutesAgo) > 10080} onClick={() => setReportTime(new Date(Date.now() - Number(minutesAgo) * 60_000))}>Continue</Button>
                 </div>
                 <div className="mt-2 flex flex-wrap gap-1.5">{[5,15,30,45,60].map((minutes) => <Button type="button" key={minutes} variant="secondary" size="sm" onClick={() => setMinutesAgo(String(minutes))}>{minutes}m</Button>)}</div>
-                <Button className="mt-3 w-full" variant="outline" disabled={!minutesAgo.trim() || !Number.isInteger(Number(minutesAgo)) || Number(minutesAgo) < 0 || Number(minutesAgo) > 10080 || busy || !!error} onClick={() => report(new Date(Date.now() - Number(minutesAgo) * 60_000))}>Save kill · {minutesAgo || "—"} minutes ago</Button>
               </div>
             </div>
           </div>
