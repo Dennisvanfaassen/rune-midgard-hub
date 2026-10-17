@@ -14,6 +14,12 @@ export type Database = {
   }
   public: {
     Tables: {
+      mvp_kill_participants: {
+        Row: { kill_id: string; user_id: string; added_by: string; created_at: string }
+        Insert: { kill_id: string; user_id: string; added_by: string; created_at?: string }
+        Update: { kill_id?: string; user_id?: string; added_by?: string; created_at?: string }
+        Relationships: []
+      }
       forum_posts: {
         Row: {
           author_id: string
