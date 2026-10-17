@@ -247,6 +247,17 @@ function MvpTracker() {
     staleTime: 60_000,
   });
   const reporterName = (id: string) => reporters.data?.[id] ?? "Guild member";
+  const reportedParticipants = useQuery({
+    queryKey: ["mvp-kill-participants"],
+    enabled: !!userId,
+    queryFn: async () => {
+      const { data, error } = await supabase.from("mvp_kill_participants").select("kill_id,user_id").limit(10000);
+      if (error) throw error;
+      return data ?? [];
+    },
+    staleTime: 15_000,
+  });
+
   const guildMembers = useQuery({
     queryKey: ["guild-members-for-kills"],
     enabled: !!userId,
@@ -302,6 +313,7 @@ function MvpTracker() {
     setBusy(false);
     refresh();
     qc.invalidateQueries({ queryKey: ["guild-achievements"] });
+    qc.invalidateQueries({ queryKey: ["mvp-kill-participants"] });
     return true;
   }
   async function claimKill(reportId: string) {
@@ -477,7 +489,10 @@ function MvpTracker() {
         <section className="rounded-xl border border-border bg-card p-5 md:p-6">
           <div className="mb-4 flex items-center justify-between gap-2"><div><h3 className="text-lg font-bold">Kill history</h3><p className="text-xs text-muted-foreground">Last reports for this MVP and map</p></div><Crosshair className="h-5 w-5 text-muted-foreground"/></div>
           {!recent.length ? <p className="rounded-lg bg-secondary/30 p-4 text-sm text-muted-foreground">No kills reported yet. Be the first to track this MVP.</p> :
-          <div className="divide-y divide-border">{recent.slice(0, 15).map((entry, index) => <div key={entry.id} className="flex items-center justify-between gap-3 py-3 text-sm"><div><span className="font-semibold">{dateTime(entry.killed_at)}</span>{index === 0 && <span className="ml-2 rounded bg-primary/10 px-2 py-0.5 text-[10px] font-semibold text-primary">Current timer</span>}<p className="text-xs text-muted-foreground">Reported by <Link to="/members/$id" params={{id:entry.reporter_id}} className="font-semibold text-primary hover:underline">{reporterName(entry.reporter_id)}</Link> · {dateTime(entry.created_at)}</p>{entry.killer_id && <p className="text-xs text-emerald-600">Self-reported kill: {reporterName(entry.killer_id)}</p>}</div><div className="flex shrink-0 items-center gap-1">
+          <div className="divide-y divide-border">{recent.slice(0, 15).map((entry, index) => <div key={entry.id} className="flex items-center justify-between gap-3 py-3 text-sm"><div><span className="font-semibold">{dateTime(entry.killed_at)}</span>{index === 0 && <span className="ml-2 rounded bg-primary/10 px-2 py-0.5 text-[10px] font-semibold text-primary">Current timer</span>}<p className="text-xs text-muted-foreground">Reported by <Link to="/members/$id" params={{id:entry.reporter_id}} className="font-semibold text-primary hover:underline">{reporterName(entry.reporter_id)}</Link> · {dateTime(entry.created_at)}</p>{(() => {
+              const ids = [...new Set([...(reportedParticipants.data ?? []).filter(p=>p.kill_id===entry.id).map(p=>p.user_id), ...(entry.killer_id?[entry.killer_id]:[])])];
+              return ids.length ? <p className="mt-1 text-xs text-emerald-600">Party credited: {ids.map(reporterName).join(", ")}</p> : null;
+            })()}</div><div className="flex shrink-0 items-center gap-1">
             {entry.reporter_id === userId && !entry.killer_id && <Button size="sm" variant="outline" disabled={busy} onClick={() => void claimKill(entry.id)}>I killed this</Button>}
             {entry.reporter_id === userId && <Button size="sm" variant="ghost" disabled={busy} aria-label="Undo this kill report" title="Undo your report" onClick={() => undo(entry.id)}><Trash2 className="h-4 w-4"/></Button>}
             </div></div>)}</div>}
