@@ -6,8 +6,12 @@ import { Button } from "@/components/ui/button";
 import { useQuery } from "@tanstack/react-query";
 import crest from "@/assets/guild-blue-bird.png.asset.json";
 import { WishlistNotifications } from "@/components/WishlistNotifications";
+import { usePartyQueue } from "@/components/PartyQueueProvider";
+import { changeQueue } from "@/lib/party-queue-api";
+import { toast } from "sonner";
 
 const NAV = [
+  { to: "/queue", label: "Party Queue" },
   { to: "/parties", label: "Party Planner" },
   { to: "/mvp-tracker", label: "MVP Tracker" },
   { to: "/calendar", label: "Calendar" },
@@ -21,8 +25,13 @@ export function SiteHeader() {
   const { userId, ready } = useAuth();
   const qc = useQueryClient();
   const navigate = useNavigate();
+  const queue = usePartyQueue();
   const guildRole = useQuery({ queryKey: ["guild-my-role", userId], enabled: !!userId, queryFn: async () => { const { data, error } = await supabase.rpc("guild_my_role"); if (error) return "Guildmember"; return data; } });
   async function signOut() {
+    if (queue?.own) {
+      try { await changeQueue("leave", queue.own.id); }
+      catch { toast.info("Your queue could not be cleared. It will expire automatically."); }
+    }
     await qc.cancelQueries();
     qc.clear();
     await supabase.auth.signOut();
@@ -40,6 +49,7 @@ export function SiteHeader() {
             <Link key={n.to} to={n.to} className="rounded-md px-3 py-1.5 text-muted-foreground hover:bg-secondary hover:text-foreground"
               activeProps={{ className: "rounded-md px-3 py-1.5 bg-secondary text-primary" }}>
               {n.label}
+              {n.to === "/queue" && queue && queue.entries.length > 0 && <span className="ml-1.5 rounded-full bg-primary/15 px-1.5 text-xs text-primary">{queue.entries.length}</span>}
             </Link>
           ))}
         </nav>
@@ -49,7 +59,7 @@ export function SiteHeader() {
               <WishlistNotifications />
               {guildRole.data === "Admin" && <Button asChild variant="outline" size="sm"><Link to="/admin">Admin</Link></Button>}
               <Button asChild variant="outline" size="sm"><Link to="/members/$id" params={{ id: userId }}>My profile</Link></Button>
-              <Button variant="ghost" size="sm" onClick={signOut}>Sign out</Button>
+              <Button variant="ghost" size="sm" disabled={queue?.mutation.isPending} onClick={signOut}>Sign out</Button>
             </>
           ) : ready ? (
             <Button asChild size="sm"><Link to="/auth">Sign in</Link></Button>
@@ -59,3 +69,4 @@ export function SiteHeader() {
     </header>
   );
 }
+

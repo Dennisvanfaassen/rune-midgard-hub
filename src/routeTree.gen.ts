@@ -16,6 +16,7 @@ import { Route as CalculatorRouteImport } from './routes/calculator'
 import { Route as CalendarRouteImport } from './routes/calendar'
 import { Route as MarketRouteImport } from './routes/market'
 import { Route as MvpTrackerRouteImport } from './routes/mvp-tracker'
+import { Route as QueueRouteImport } from './routes/queue'
 import { Route as SkillsRouteImport } from './routes/skills'
 import { Route as WishlistsRouteImport } from './routes/wishlists'
 import { Route as ForumIndexRouteImport } from './routes/forum.index'
@@ -59,6 +60,11 @@ const MarketRoute = MarketRouteImport.update({
 const MvpTrackerRoute = MvpTrackerRouteImport.update({
   id: '/mvp-tracker',
   path: '/mvp-tracker',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const QueueRoute = QueueRouteImport.update({
+  id: '/queue',
+  path: '/queue',
   getParentRoute: () => rootRouteImport,
 } as any)
 const SkillsRoute = SkillsRouteImport.update({
@@ -115,6 +121,7 @@ export interface FileRoutesByFullPath {
   '/calendar': typeof CalendarRoute
   '/market': typeof MarketRoute
   '/mvp-tracker': typeof MvpTrackerRoute
+  '/queue': typeof QueueRoute
   '/skills': typeof SkillsRoute
   '/wishlists': typeof WishlistsRoute
   '/forum/$id': typeof ForumIdRoute
@@ -133,6 +140,7 @@ export interface FileRoutesByTo {
   '/calendar': typeof CalendarRoute
   '/market': typeof MarketRoute
   '/mvp-tracker': typeof MvpTrackerRoute
+  '/queue': typeof QueueRoute
   '/skills': typeof SkillsRoute
   '/wishlists': typeof WishlistsRoute
   '/forum/$id': typeof ForumIdRoute
@@ -152,6 +160,7 @@ export interface FileRoutesById {
   '/calendar': typeof CalendarRoute
   '/market': typeof MarketRoute
   '/mvp-tracker': typeof MvpTrackerRoute
+  '/queue': typeof QueueRoute
   '/skills': typeof SkillsRoute
   '/wishlists': typeof WishlistsRoute
   '/forum/$id': typeof ForumIdRoute
@@ -172,6 +181,7 @@ export interface FileRouteTypes {
     | '/calendar'
     | '/market'
     | '/mvp-tracker'
+    | '/queue'
     | '/skills'
     | '/wishlists'
     | '/forum/$id'
@@ -190,6 +200,7 @@ export interface FileRouteTypes {
     | '/calendar'
     | '/market'
     | '/mvp-tracker'
+    | '/queue'
     | '/skills'
     | '/wishlists'
     | '/forum/$id'
@@ -208,6 +219,7 @@ export interface FileRouteTypes {
     | '/calendar'
     | '/market'
     | '/mvp-tracker'
+    | '/queue'
     | '/skills'
     | '/wishlists'
     | '/forum/$id'
@@ -227,6 +239,7 @@ export interface RootRouteChildren {
   CalendarRoute: typeof CalendarRoute
   MarketRoute: typeof MarketRoute
   MvpTrackerRoute: typeof MvpTrackerRoute
+  QueueRoute: typeof QueueRoute
   SkillsRoute: typeof SkillsRoute
   WishlistsRoute: typeof WishlistsRoute
   ForumIdRoute: typeof ForumIdRoute
@@ -287,6 +300,13 @@ declare module '@tanstack/react-router' {
       path: '/mvp-tracker'
       fullPath: '/mvp-tracker'
       preLoaderRoute: typeof MvpTrackerRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/queue': {
+      id: '/queue'
+      path: '/queue'
+      fullPath: '/queue'
+      preLoaderRoute: typeof QueueRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/skills': {
@@ -363,6 +383,7 @@ const rootRouteChildren: RootRouteChildren = {
   CalendarRoute: CalendarRoute,
   MarketRoute: MarketRoute,
   MvpTrackerRoute: MvpTrackerRoute,
+  QueueRoute: QueueRoute,
   SkillsRoute: SkillsRoute,
   WishlistsRoute: WishlistsRoute,
   ForumIdRoute: ForumIdRoute,

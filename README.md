@@ -10,6 +10,8 @@ You can use the data from the files i have sent you to build the calculators
 
 This project was built with [Lovable](https://lovable.dev).
 
+Party Queue: see [setup, behavior and acceptance checks](docs/party-queue.md).
+
 ## Build with Lovable
 
 Continue developing this project in the [Lovable editor](https://lovable.dev/projects/fb8a44cd-f688-4e2f-aecf-29994555486b).
@@ -28,3 +30,4 @@ cd <repository-name>
 npm i
 npm run dev
 ```
+

@@ -5,6 +5,10 @@ export const JOBS = [
 ] as const;
 export type Job = (typeof JOBS)[number];
 
+/** Episode 6 queue: first jobs and 2-1/2-2 only. Keep legacy profiles intact. */
+export const EPISODE_6_JOBS = JOBS.filter((job) => job !== "Supernovice");
+export const isEpisode6Job = (job: string) => EPISODE_6_JOBS.some((allowed) => allowed === job);
+
 export const jobName = (j: string) => (j === "Supernovice" ? "Super Novice" : j);
 
 export const MAX_PARTY_SIZE = 12;
@@ -50,3 +54,4 @@ export const canAddSlot = (count: number) => count < MAX_PARTY_SIZE;
 
 /** Can a player of `job` take a slot that asks for `role`? */
 export const canTakeSlot = (role: string, job: string) => PARTY_ROLES.includes(role) || role === job;
+

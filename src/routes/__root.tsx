@@ -18,6 +18,7 @@ import { SiteHeader } from "@/components/SiteHeader";
 import guildCrest from "@/assets/guild-blue-bird.png.asset.json";
 import { WebsiteThemeManager } from "@/components/WebsiteTheme";
 import { Toaster } from "@/components/ui/sonner";
+import { PartyQueueProvider } from "@/components/PartyQueueProvider";
 
 function NotFoundComponent() {
   return (
@@ -134,16 +135,19 @@ function RootComponent() {
   return (
     <QueryClientProvider client={queryClient}>
       <AuthProvider>
-        <WebsiteThemeManager />
-        <div className="min-h-screen">
-          <SiteHeader />
-          <Outlet />
-          <footer className="mt-16 border-t border-border py-6 text-center text-xs text-muted-foreground">
-            Rune Midgard guild · Calculations based on rAthena pre-renewal formulas
-          </footer>
-        </div>
-        <Toaster />
+        <PartyQueueProvider>
+          <WebsiteThemeManager />
+          <div className="min-h-screen">
+            <SiteHeader />
+            <Outlet />
+            <footer className="mt-16 border-t border-border py-6 text-center text-xs text-muted-foreground">
+              Rune Midgard guild · Calculations based on rAthena pre-renewal formulas
+            </footer>
+          </div>
+          <Toaster />
+        </PartyQueueProvider>
       </AuthProvider>
     </QueryClientProvider>
   );
 }
+

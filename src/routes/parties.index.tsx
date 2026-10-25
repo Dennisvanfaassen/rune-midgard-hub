@@ -54,6 +54,7 @@ function Parties() {
         {userId ? <Button asChild><Link to="/parties/new">Plan a party</Link></Button>
           : <Button asChild variant="outline"><Link to="/auth">Sign in to plan a party</Link></Button>}
       </div>
+      <Link to="/queue" className="mt-5 flex flex-wrap items-center justify-between gap-2 rounded-xl border border-primary/25 bg-primary/5 p-4 text-sm hover:border-primary/60"><span><strong>Ready to play right now?</strong> Find a duo or party in the live queue.</span><span className="font-semibold text-primary">Open Party Queue →</span></Link>
       {isLoading && <p className="mt-6 text-muted-foreground">Loading…</p>}
       {isError && <p className="mt-6 rounded-lg border border-destructive p-4 text-destructive">Could not load parties: {error instanceof Error ? error.message : String((error as {message?:string})?.message ?? error)}</p>}
       <div className="mt-6 grid gap-3">
@@ -75,3 +76,4 @@ function Parties() {
     </main>
   );
 }
+
