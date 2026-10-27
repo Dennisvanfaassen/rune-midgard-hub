@@ -287,13 +287,10 @@ function PartyPage() {
               <div className="text-xs uppercase tracking-wide text-muted-foreground">{s.role === "Any" ? "Any class" : jobName(s.role)}</div>
               {s.user_id ? (
                 <Link to="/members/$id" params={{ id: s.user_id }} className="font-semibold hover:text-primary">
-                  {s.char_name || s.profiles?.display_name} <GuildBadge role={badges.data?.[s.user_id ?? ""]} /> {readiness.data?.find((r) => r.user_id === s.user_id)?.ready && <span title="Member ready" className="text-xs text-emerald-500">✓ Ready</span>} {readiness.data?.find((r) => r.user_id === s.user_id)?.supplies_ready && <span title="Supplies ready" className="text-xs text-emerald-500">✓ Supplies</span>} <span className="text-sm text-primary">{s.job && jobName(s.job)}</span>
+                  {s.char_name || s.profiles?.display_name} <GuildBadge role={badges.data?.[s.user_id ?? ""]} /> {s.profiles && <span className="ml-1 inline-flex items-center rounded-md border border-primary/40 bg-primary/10 px-2 py-0.5 text-xs font-bold text-primary" title="Current character Base and Job levels">Base {s.profiles.base_lv} · Job {s.profiles.job_lv}</span>} {readiness.data?.find((r) => r.user_id === s.user_id)?.ready && <span title="Member ready" className="text-xs text-emerald-500">✓ Ready</span>} {readiness.data?.find((r) => r.user_id === s.user_id)?.supplies_ready && <span title="Supplies ready" className="text-xs text-emerald-500">✓ Supplies</span>} <span className="text-sm text-primary">{s.job && jobName(s.job)}</span>
                 </Link>
               ) : <div className="text-sm text-muted-foreground">Open slot</div>}
-              {s.user_id && s.profiles && <div className="mt-1 flex flex-wrap items-center gap-2 text-xs">
-                <span className="rounded-md border border-primary/25 bg-primary/10 px-2 py-1 font-semibold text-primary">Base {s.profiles.base_lv} / Job {s.profiles.job_lv}</span>
-                <span className="text-muted-foreground">{jobName(s.profiles.job)}</span>
-              </div>}
+              {s.user_id && s.profiles && <div className="mt-1 text-xs text-muted-foreground">Profile class: {jobName(s.profiles.job)}</div>}
               {s.user_id && <div className="mt-1 text-xs text-muted-foreground">{availabilityText(attendanceOf(s.user_id))}{attendanceOf(s.user_id)?.message ? ` · ${attendanceOf(s.user_id)?.message}` : ""}</div>}
               {s.user_id && specs.data?.find((spec) => spec.user_id === s.user_id)?.specialization && <div className="mt-1 text-xs font-medium text-primary">{specs.data?.find((spec) => spec.user_id === s.user_id)?.specialization}</div>}
             </div>
