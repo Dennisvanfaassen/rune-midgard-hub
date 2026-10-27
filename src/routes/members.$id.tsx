@@ -65,6 +65,7 @@ function Profile() {
         {p.birthday_month && p.birthday_day && <p className="mt-2 text-sm text-muted-foreground">🎂 Birthday: {new Date(2024,p.birthday_month-1,p.birthday_day).toLocaleDateString(undefined,{month:"long",day:"numeric"})}</p>}
         {p.bio && <p className="mt-3 whitespace-pre-line text-muted-foreground">{p.bio}</p>}
         </div></div>
+        {isOwner && <QuickLevels p={p} onSaved={() => { qc.invalidateQueries({ queryKey: ["profile", id] }); qc.invalidateQueries({ queryKey: ["members"] }); }} />}
         {isOwner && <ThemePreference />}
         {isOwner && <EditProfile p={p} onSaved={() => { qc.invalidateQueries({ queryKey: ["profile", id] }); qc.invalidateQueries({ queryKey: ["members"] }); qc.invalidateQueries({ queryKey: ["wishlists"] }); }} />}
       </section>
@@ -107,6 +108,42 @@ function Profile() {
       </section>
     </main>
   );
+}
+
+function QuickLevels({ p, onSaved }: { p: { id: string; base_lv: number; job_lv: number }; onSaved: () => void }) {
+  const [saving, setSaving] = useState(false);
+  const [base, setBase] = useState(p.base_lv);
+  const [job, setJob] = useState(p.job_lv);
+  useEffect(() => { setBase(p.base_lv); setJob(p.job_lv); }, [p.base_lv, p.job_lv]);
+  async function save(baseLevel: number, jobLevel: number) {
+    if (saving) return;
+    if (!Number.isInteger(baseLevel) || baseLevel < 1 || baseLevel > 99 || !Number.isInteger(jobLevel) || jobLevel < 1 || jobLevel > 70) {
+      toast.error("Base must be 1–99 and Job must be 1–70"); return;
+    }
+    setSaving(true);
+    const { error } = await supabase.from("profiles").update({ base_lv: baseLevel, job_lv: jobLevel }).eq("id", p.id);
+    setSaving(false);
+    if (error) { toast.error(error.message); setBase(p.base_lv); setJob(p.job_lv); }
+    else { toast.success("Levels updated for party rosters"); onSaved(); }
+  }
+  return <section className="mt-5 max-w-xl rounded-xl border border-primary/30 bg-card p-4">
+    <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+      <h2 className="text-base font-bold">Quick level update</h2>
+      <span className="text-xs text-muted-foreground">Updates your guild profile</span>
+    </div>
+    <div className="grid gap-3 sm:grid-cols-2">
+      {([{ label: "Base level", value: base, set: setBase, max: 99 }, { label: "Job level", value: job, set: setJob, max: 70 }] as const).map((v) =>
+        <div key={v.label} className="rounded-lg border border-border bg-secondary/20 p-3">
+          <label className="mb-2 block text-xs font-medium text-muted-foreground">{v.label}</label>
+          <div className="flex items-center gap-2">
+            <Button type="button" size="sm" variant="outline" disabled={saving || v.value <= 1} onClick={() => { const n = v.value - 1; v.set(n); save(v.label === "Base level" ? n : base, v.label === "Job level" ? n : job); }} aria-label={`Decrease ${v.label}`}>−</Button>
+            <Input aria-label={v.label} className="min-w-0 text-center font-bold" type="number" min={1} max={v.max} value={v.value} onChange={(e) => v.set(Number(e.target.value))} onBlur={() => { if (base !== p.base_lv || job !== p.job_lv) save(base, job); }} />
+            <Button type="button" size="sm" variant="outline" disabled={saving || v.value >= v.max} onClick={() => { const n = v.value + 1; v.set(n); save(v.label === "Base level" ? n : base, v.label === "Job level" ? n : job); }} aria-label={`Increase ${v.label}`}>+</Button>
+          </div>
+        </div>)}
+    </div>
+    <p className="mt-3 text-xs text-muted-foreground">Your latest levels will be displayed next to your name in party rosters.</p>
+  </section>;
 }
 
 function EditProfile({ p, onSaved }: { p: { id: string; display_name: string; char_name: string | null; job: string; base_lv: number; job_lv: number; bio: string | null; avatar_path: string | null; birthday_month: number | null; birthday_day: number | null }; onSaved: () => void }) {
