@@ -173,9 +173,15 @@ function EditProfile({ p, onSaved }: { p: { id: string; display_name: string; ch
       <Input placeholder="Display name" value={f.display_name} maxLength={40} onChange={(e) => setF({ ...f, display_name: e.target.value })} />
       <Input placeholder="Character name" value={f.char_name} maxLength={24} onChange={(e) => setF({ ...f, char_name: e.target.value })} />
       <JobSelect value={f.job} onChange={(job) => setF({ ...f, job })} />
-      <div className="flex gap-2">
-        <Input type="number" min={1} max={99} value={f.base_lv} onChange={(e) => setF({ ...f, base_lv: +e.target.value })} />
-        <Input type="number" min={1} max={70} value={f.job_lv} onChange={(e) => setF({ ...f, job_lv: +e.target.value })} />
+      <div className="grid grid-cols-2 gap-3">
+        <div className="space-y-1.5">
+          <label htmlFor="edit-base-level" className="block text-sm font-medium">Base Level</label>
+          <Input id="edit-base-level" aria-label="Base Level" type="number" min={1} max={99} value={f.base_lv} onChange={(e) => setF({ ...f, base_lv: +e.target.value })} />
+        </div>
+        <div className="space-y-1.5">
+          <label htmlFor="edit-job-level" className="block text-sm font-medium">Job Level</label>
+          <Input id="edit-job-level" aria-label="Job Level" type="number" min={1} max={70} value={f.job_lv} onChange={(e) => setF({ ...f, job_lv: +e.target.value })} />
+        </div>
       </div>
       <div className="sm:col-span-2 rounded-lg border border-border p-3"><p className="mb-2 text-sm font-semibold">Birthday (optional)</p><p className="mb-3 text-xs text-muted-foreground">Only your month and day appear on the guild calendar. Your birth year is not collected.</p><div className="flex gap-3"><select aria-label="Birthday month" className="flex-1 rounded-md border border-input bg-background p-2 text-sm" value={f.birthday_month} onChange={(e) => setF({...f,birthday_month:e.target.value})}><option value="">Month (hidden)</option>{Array.from({length:12},(_,i)=><option key={i+1} value={i+1}>{new Date(2024,i,1).toLocaleString(undefined,{month:"long"})}</option>)}</select><select aria-label="Birthday day" className="w-28 rounded-md border border-input bg-background p-2 text-sm" value={f.birthday_day} onChange={(e) => setF({...f,birthday_day:e.target.value})}><option value="">Day</option>{Array.from({length:31},(_,i)=><option key={i+1} value={i+1}>{i+1}</option>)}</select></div></div>
       <Textarea className="sm:col-span-2" placeholder="About you" maxLength={500} value={f.bio} onChange={(e) => setF({ ...f, bio: e.target.value })} />
