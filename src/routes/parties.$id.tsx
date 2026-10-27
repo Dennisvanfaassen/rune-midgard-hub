@@ -49,7 +49,7 @@ function PartyPage() {
       if (slotResult.error) throw new Error(`Party slots: ${slotResult.error.message} (${slotResult.error.code})`);
       const slots = slotResult.data ?? [];
       const members = [...new Set(slots.map((slot) => slot.user_id).filter((v): v is string => !!v))];
-      const memberResult = members.length ? await supabase.from("profiles").select("id,display_name,char_name").in("id", members) : null;
+      const memberResult = members.length ? await supabase.from("profiles").select("id,display_name,char_name,job,base_lv,job_lv").in("id", members) : null;
       if (memberResult?.error) console.warn("Member names unavailable:", memberResult.error);
       return {
         ...party,
@@ -290,6 +290,10 @@ function PartyPage() {
                   {s.char_name || s.profiles?.display_name} <GuildBadge role={badges.data?.[s.user_id ?? ""]} /> {readiness.data?.find((r) => r.user_id === s.user_id)?.ready && <span title="Member ready" className="text-xs text-emerald-500">✓ Ready</span>} {readiness.data?.find((r) => r.user_id === s.user_id)?.supplies_ready && <span title="Supplies ready" className="text-xs text-emerald-500">✓ Supplies</span>} <span className="text-sm text-primary">{s.job && jobName(s.job)}</span>
                 </Link>
               ) : <div className="text-sm text-muted-foreground">Open slot</div>}
+              {s.user_id && s.profiles && <div className="mt-1 flex flex-wrap items-center gap-2 text-xs">
+                <span className="rounded-md border border-primary/25 bg-primary/10 px-2 py-1 font-semibold text-primary">Base {s.profiles.base_lv} / Job {s.profiles.job_lv}</span>
+                <span className="text-muted-foreground">{jobName(s.profiles.job)}</span>
+              </div>}
               {s.user_id && <div className="mt-1 text-xs text-muted-foreground">{availabilityText(attendanceOf(s.user_id))}{attendanceOf(s.user_id)?.message ? ` · ${attendanceOf(s.user_id)?.message}` : ""}</div>}
               {s.user_id && specs.data?.find((spec) => spec.user_id === s.user_id)?.specialization && <div className="mt-1 text-xs font-medium text-primary">{specs.data?.find((spec) => spec.user_id === s.user_id)?.specialization}</div>}
             </div>
